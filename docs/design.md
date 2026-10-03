@@ -80,12 +80,18 @@ Internal app also needs no verification and its refresh tokens do not expire
   `max_duration_s` = event length + `OVERRUN_S` (1800), `empty_grace_s` =
   `EMPTY_GRACE_S` (60). From then on the job follows `architecture.md` §3–§5,
   as in any orchestrator.
+* An accepted `recording.finished` stores the transcriber body in `job.json`
+  together with the `finished` state, before anything is sent; `handed_off`
+  is set once the transcriber answers `2xx`. Delivery retries on `5 s, 15 s,
+  45 s, 2 min, 5 min`, then an hourly sweep and every startup send whatever is
+  still not handed off. Redirects are not followed.
 * `invalid_grant` on refresh → delete the connection, e-mail its owner once.
 
 ## 5. Notifications (e-mail)
 
 Plain-text mail through `SMTP_HOST`/`SMTP_PORT`/`SMTP_USER`/`SMTP_PASSWORD`
-(STARTTLS), from `SMTP_FROM`, to every address on the job's notify list:
+(STARTTLS), from `SMTP_FROM`, to every address on the job's notify list.
+`SMTP_HOST` is optional: empty disables e-mail.
 
 | trigger | subject |
 |---|---|

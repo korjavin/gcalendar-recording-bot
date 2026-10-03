@@ -47,6 +47,9 @@ type job struct {
 	Notify []string  `json:"notify"`
 	Events []string  `json:"events,omitempty"` // recorder events handled, for idempotency
 	Error  string    `json:"error,omitempty"`
+
+	Webhook   *webhook `json:"webhook,omitempty"`    // transcriber body, set on an accepted recording.finished
+	HandedOff bool     `json:"handed_off,omitempty"` // the transcriber answered 2xx to Webhook
 }
 
 const stateScheduled = "scheduled"

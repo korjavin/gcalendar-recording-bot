@@ -232,10 +232,7 @@ func TestEvents(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			cfg, _, _, smtp := schedulerSetup(t)
-			var handed []string
-			old := handOff
-			handOff = func(_ *Config, j *job, _ []byte) { handed = append(handed, j.ID) }
-			t.Cleanup(func() { handOff = old })
+			tr := newFakeTranscriber(t, cfg)
 			putJob(t, cfg, id, stateStarted, meetLink, time.Now())
 
 			for range 2 { // the repeat is acknowledged without side effects
@@ -249,9 +246,12 @@ func TestEvents(t *testing.T) {
 			if tc.subject != "" {
 				smtp.subject(t, tc.subject)
 			}
+			if tc.handedOff {
+				waitHandedOff(t, cfg, id)
+			}
 			smtp.none(t)
-			if want := tc.handedOff; (len(handed) == 1) != want || len(handed) > 1 {
-				t.Errorf("handed off %v, want once=%v", handed, want)
+			if n := len(tr.requests()); n != map[bool]int{true: 1}[tc.handedOff] {
+				t.Errorf("%d transcriber requests, want handed off once=%v", n, tc.handedOff)
 			}
 		})
 	}
