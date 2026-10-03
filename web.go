@@ -121,7 +121,7 @@ func handleCallback(w http.ResponseWriter, r *http.Request, cfg *Config) {
 
 	refresh, email, err := exchangeCode(r, cfg, code)
 	if errors.Is(err, errNoCalendar) {
-		render(w, cfg, http.StatusBadRequest, page{Message: "Calendar access was not granted, so nothing was connected. Please connect again and allow calendar access."})
+		render(w, cfg, http.StatusBadRequest, page{Message: "Calendar access was not granted, so nothing was connected. Please connect again and keep the calendar permission ticked on Google's consent screen."})
 		return
 	}
 	if err != nil {

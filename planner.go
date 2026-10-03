@@ -192,16 +192,20 @@ func pollOnce(ctx context.Context, cfg *Config, now time.Time) error {
 		if !strings.HasSuffix(e.Name(), ".json") {
 			continue
 		}
+		conn := strings.TrimSuffix(e.Name(), ".json")
+		if len(conn) > 12 {
+			conn = conn[:12] // the short hash, as in every other log line
+		}
 		path := filepath.Join(cfg.DataDir, "connections", e.Name())
 		data, err := os.ReadFile(path)
 		if err != nil {
 			if !os.IsNotExist(err) { // not just removed since ReadDir
 				complete = false
-				slog.Warn("read connection failed", "connection", strings.TrimSuffix(e.Name(), ".json"), "err", err)
+				slog.Warn("read connection failed", "connection", conn, "err", err)
 			}
 			continue
 		}
-		email, err := pollConnection(ctx, cfg, data, now, cands)
+		email, fetched, matched, err := pollConnection(ctx, cfg, data, now, cands)
 		switch {
 		case errors.Is(err, errInvalidGrant):
 			if dropConnection(path, data) {
@@ -212,30 +216,33 @@ func pollOnce(ctx context.Context, cfg *Config, now time.Time) error {
 			}
 		case err != nil:
 			complete = false
-			slog.Warn("poll connection failed", "connection", strings.TrimSuffix(e.Name(), ".json"), "err", err)
+			slog.Warn("poll connection failed", "connection", conn, "err", err)
+		default:
+			slog.Info("connection polled", "connection", conn, "events", fetched, "candidates", matched)
 		}
 	}
 	return reconcile(cfg.DataDir, cands, complete)
 }
 
 // pollConnection adds the connection's candidates to cands and returns the
-// connection's e-mail (for logs and the disconnect notice).
-func pollConnection(ctx context.Context, cfg *Config, data []byte, now time.Time, cands map[string]*job) (string, error) {
+// connection's e-mail (for logs and the disconnect notice) with the number of
+// events fetched and of candidates among them.
+func pollConnection(ctx context.Context, cfg *Config, data []byte, now time.Time, cands map[string]*job) (email string, fetched, matched int, err error) {
 	var c connection
 	if err := json.Unmarshal(data, &c); err != nil {
-		return "", fmt.Errorf("connection file: %w", err)
+		return "", 0, 0, fmt.Errorf("connection file: %w", err)
 	}
 	refresh, err := decryptToken(cfg.TokenKey, c.RefreshToken, c.Email)
 	if err != nil {
-		return c.Email, fmt.Errorf("decrypt token: %w", err)
+		return c.Email, 0, 0, fmt.Errorf("decrypt token: %w", err)
 	}
 	access, err := refreshAccessToken(ctx, cfg, refresh)
 	if err != nil {
-		return c.Email, err
+		return c.Email, 0, 0, err
 	}
 	events, err := listEvents(ctx, access, now)
 	if err != nil {
-		return c.Email, err
+		return c.Email, 0, 0, err
 	}
 	for i := range events {
 		ev := &events[i]
@@ -243,6 +250,7 @@ func pollConnection(ctx context.Context, cfg *Config, data []byte, now time.Time
 		if u == "" {
 			continue
 		}
+		matched++
 		id := jobID(ev.ICalUID, ev.Start.DateTime)
 		j := cands[id]
 		if j == nil {
@@ -254,7 +262,7 @@ func pollConnection(ctx context.Context, cfg *Config, data []byte, now time.Time
 			j.Notify = append(j.Notify, c.Email)
 		}
 	}
-	return c.Email, nil
+	return c.Email, len(events), matched, nil
 }
 
 // refreshAccessToken trades a refresh token for an access token.
@@ -277,7 +285,7 @@ func refreshAccessToken(ctx context.Context, cfg *Config, refresh string) (strin
 	defer resp.Body.Close()
 	var tok struct {
 		AccessToken string `json:"access_token"`
-		Error       string `json:"error"`
+		Error       string `json:"error"` // an OAuth error code such as invalid_client; never a secret
 	}
 	if err := json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&tok); err != nil {
 		return "", fmt.Errorf("token endpoint status %d: response is not JSON", resp.StatusCode)
@@ -286,7 +294,7 @@ func refreshAccessToken(ctx context.Context, cfg *Config, refresh string) (strin
 		return "", errInvalidGrant
 	}
 	if resp.StatusCode != http.StatusOK || tok.AccessToken == "" {
-		return "", fmt.Errorf("token endpoint status %d", resp.StatusCode)
+		return "", fmt.Errorf("token endpoint status %d: %s", resp.StatusCode, truncate(tok.Error))
 	}
 	return tok.AccessToken, nil
 }
@@ -315,16 +323,19 @@ func listEvents(ctx context.Context, access string, now time.Time) ([]calEvent, 
 		if err != nil {
 			return nil, err
 		}
+		body, err := io.ReadAll(io.LimitReader(resp.Body, 16<<20))
+		resp.Body.Close()
+		if err != nil {
+			return nil, fmt.Errorf("events.list response: %w", err)
+		}
+		if resp.StatusCode != http.StatusOK {
+			return nil, fmt.Errorf("events.list status %d: %s", resp.StatusCode, googleErrorReason(body))
+		}
 		var page struct {
 			Items         []calEvent `json:"items"`
 			NextPageToken string     `json:"nextPageToken"`
 		}
-		err = json.NewDecoder(io.LimitReader(resp.Body, 16<<20)).Decode(&page)
-		resp.Body.Close()
-		if resp.StatusCode != http.StatusOK {
-			return nil, fmt.Errorf("events.list status %d", resp.StatusCode)
-		}
-		if err != nil {
+		if err := json.Unmarshal(body, &page); err != nil {
 			return nil, fmt.Errorf("events.list response: %w", err)
 		}
 		all = append(all, page.Items...)
@@ -333,6 +344,44 @@ func listEvents(ctx context.Context, access string, now time.Time) ([]calEvent, 
 		}
 		pageToken = page.NextPageToken
 	}
+}
+
+// googleErrorReason summarises a Google API error body as "<reason>: <message>"
+// (e.g. accessNotConfigured, insufficientPermissions), truncated for logs.
+func googleErrorReason(body []byte) string {
+	var e struct {
+		Error struct {
+			Message string `json:"message"`
+			Status  string `json:"status"`
+			Errors  []struct {
+				Reason string `json:"reason"`
+			} `json:"errors"`
+		} `json:"error"`
+	}
+	if json.Unmarshal(body, &e) != nil {
+		return "no JSON error body"
+	}
+	reason := e.Error.Status
+	if len(e.Error.Errors) > 0 && e.Error.Errors[0].Reason != "" {
+		reason = e.Error.Errors[0].Reason
+	}
+	return truncate(reason + ": " + e.Error.Message)
+}
+
+// truncate caps an external string at 200 bytes for a log line.
+func truncate(s string) string {
+	if len(s) > 200 {
+		s = strings.ToValidUTF8(s[:200], "") + "..."
+	}
+	return s
+}
+
+// callKind names the call platform for logs; the URL itself is never logged.
+func callKind(callURL string) string {
+	if meetURL(callURL) != "" {
+		return "meet"
+	}
+	return "jitsi"
 }
 
 func jobPath(dataDir, id string) string { return filepath.Join(dataDir, "jobs", id, "job.json") }
@@ -362,11 +411,13 @@ func reconcile(dataDir string, cands map[string]*job, complete bool) error {
 	}
 
 	var errs []error
+	scheduled, dropped, total := 0, 0, 0
 	for id, c := range cands {
 		old := existing[id]
 		if old != nil && old.State != stateScheduled {
 			continue
 		}
+		total++
 		if old != nil && !complete {
 			for _, e := range old.Notify {
 				if !slices.Contains(c.Notify, e) {
@@ -386,20 +437,25 @@ func reconcile(dataDir string, cands map[string]*job, complete bool) error {
 			errs = append(errs, err)
 			continue
 		}
-		if old == nil {
-			slog.Info("job scheduled", "job", id, "start", c.Start)
-		}
+		scheduled++
+		slog.Info("job scheduled", "job", id, "start", c.Start, "kind", callKind(c.URL), "new", old == nil)
 	}
-	if complete {
-		for id, j := range existing {
-			if j.State == stateScheduled && cands[id] == nil {
-				if err := os.RemoveAll(filepath.Join(dataDir, "jobs", id)); err != nil {
-					errs = append(errs, err)
-					continue
-				}
-				slog.Info("job dropped", "job", id)
-			}
+	for id, j := range existing {
+		if j.State != stateScheduled || cands[id] != nil {
+			continue
 		}
+		if !complete {
+			total++ // kept: a failed connection may still list it
+			continue
+		}
+		if err := os.RemoveAll(filepath.Join(dataDir, "jobs", id)); err != nil {
+			errs = append(errs, err)
+			total++
+			continue
+		}
+		dropped++
+		slog.Info("job dropped", "job", id)
 	}
+	slog.Info("poll done", "jobs_scheduled", scheduled, "jobs_dropped", dropped, "jobs_total", total, "complete", complete)
 	return errors.Join(errs...)
 }
