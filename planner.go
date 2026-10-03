@@ -184,7 +184,11 @@ func pollOnce(ctx context.Context, cfg *Config, now time.Time) error {
 		path := filepath.Join(cfg.DataDir, "connections", e.Name())
 		data, err := os.ReadFile(path)
 		if err != nil {
-			continue // removed since ReadDir
+			if !os.IsNotExist(err) { // not just removed since ReadDir
+				complete = false
+				slog.Warn("read connection failed", "connection", strings.TrimSuffix(e.Name(), ".json"), "err", err)
+			}
+			continue
 		}
 		email, err := pollConnection(ctx, cfg, data, now, cands)
 		switch {
@@ -192,6 +196,8 @@ func pollOnce(ctx context.Context, cfg *Config, now time.Time) error {
 			if dropConnection(path, data) {
 				slog.Info("calendar access revoked; connection dropped", "email_hash", emailHash(email)[:12])
 				sendDisconnected(cfg, email)
+			} else {
+				complete = false // reconnected meanwhile; its calendar is unpolled
 			}
 		case err != nil:
 			complete = false
