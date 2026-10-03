@@ -152,6 +152,7 @@ func finishStart(cfg *Config, started *job, err error) {
 	}
 	if werr := writeJob(cfg.DataDir, j); werr != nil {
 		slog.Error("write job failed", "job", j.ID, "err", werr)
+		return // still "starting": the next tick tries again
 	}
 	if err != nil {
 		notifier.mailFailed(j.ID, j.Notify, j.Title, "the recorder could not be reached")

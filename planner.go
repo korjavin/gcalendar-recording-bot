@@ -151,13 +151,19 @@ func candidateURL(ev *calEvent, botEmail, jitsiBase string) string {
 	return callURL(ev, jitsiBase)
 }
 
-// runPlanner polls every PollInterval until ctx ends.
-func runPlanner(ctx context.Context, cfg *Config) {
+// runPlanner polls every PollInterval until ctx ends, calling afterFirst
+// once the first poll is over (so stale jobs from before a restart are
+// reconciled before anything starts them).
+func runPlanner(ctx context.Context, cfg *Config, afterFirst func()) {
 	t := time.NewTicker(cfg.PollInterval)
 	defer t.Stop()
 	for {
 		if err := pollOnce(ctx, cfg, time.Now()); err != nil {
 			slog.Error("poll failed", "err", err)
+		}
+		if afterFirst != nil {
+			afterFirst()
+			afterFirst = nil
 		}
 		select {
 		case <-ctx.Done():
