@@ -150,6 +150,25 @@ func TestWatchdogMissesInARow(t *testing.T) {
 	smtp.none(t)
 }
 
+// A job saved without a deadline is not overdue before its meeting could
+// have ended.
+func TestWatchdogNoDeadline(t *testing.T) {
+	cfg, _, _, _ := schedulerSetup(t) // the fake recorder answers GET with 404
+	now := time.Date(2026, 10, 3, 10, 0, 0, 0, time.UTC)
+	putJob(t, cfg, "cal-0000000000000001", stateStarted, meetLink, now)
+	for i := range 3 {
+		watchOverdue(context.Background(), cfg, now.Add(time.Duration(i)*time.Minute))
+	}
+	if j, _ := readJob(cfg.DataDir, "cal-0000000000000001"); j.State != stateStarted || j.Misses != 0 {
+		t.Errorf("state %q misses %d, want started and unchecked", j.State, j.Misses)
+	}
+	// 20 min join + 1 h meeting + 30 min overrun + 10 min
+	watchOverdue(context.Background(), cfg, now.Add(2*time.Hour))
+	if j, _ := readJob(cfg.DataDir, "cal-0000000000000001"); j.Misses != 1 {
+		t.Errorf("misses %d after the deadline, want 1", j.Misses)
+	}
+}
+
 func TestClaimSetsDeadline(t *testing.T) {
 	cfg, _, _, _ := schedulerSetup(t)
 	now := time.Date(2026, 10, 3, 10, 0, 0, 0, time.UTC)

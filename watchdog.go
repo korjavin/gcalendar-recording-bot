@@ -57,7 +57,14 @@ func overdueJobs(cfg *Config, now time.Time) []*job {
 	var due []*job
 	for _, e := range ents {
 		j, err := readJob(cfg.DataDir, e.Name())
-		if err == nil && (j.State == stateStarting || j.State == stateStarted) && !now.Before(j.Deadline) {
+		if err != nil || (j.State != stateStarting && j.State != stateStarted) {
+			continue
+		}
+		deadline := j.Deadline
+		if deadline.IsZero() { // saved before deadlines existed: assume it started at the meeting's start
+			deadline = j.Start.Add(cfg.JoinTimeout + maxDuration(cfg, j) + watchdogDelay)
+		}
+		if !now.Before(deadline) {
 			due = append(due, j)
 		}
 	}
