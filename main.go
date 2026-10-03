@@ -17,7 +17,7 @@ func main() {
 
 	srv := &http.Server{
 		Addr:              cfg.ListenAddr,
-		Handler:           newMux(),
+		Handler:           webMux(cfg),
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 	slog.Info("listening", "addr", cfg.ListenAddr)
