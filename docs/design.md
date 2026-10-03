@@ -115,8 +115,8 @@ Sending is best effort with a few retries; a lost e-mail never blocks a job.
 | endpoint | caller | auth |
 |---|---|---|
 | `GET /`, `GET /connect`, `GET /oauth/callback` | people (public via Traefik) | none / OAuth `state` |
-| `POST /events` | recorders (Docker network) | `x-recorder-signature` |
-| `POST /notify` | tr2outline | `x-jitsi-capture-signature` (`WEBHOOK_SECRET`) |
+| `POST /events` | recorders, at `PUBLIC_URL` (via Traefik) | `x-recorder-signature` |
+| `POST /notify` | tr2outline, at `PUBLIC_URL` | `x-jitsi-capture-signature` (`WEBHOOK_SECRET`) |
 | `GET /health` | anyone | none |
 
 ## 7. Not now

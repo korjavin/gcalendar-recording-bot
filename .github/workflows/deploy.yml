@@ -1,0 +1,81 @@
+name: Build and Deploy
+
+on:
+  push:
+    branches:
+      - master
+  workflow_dispatch:
+
+# A newer push cancels an older run, so a slow old build can never force-push
+# `deploy` back to an older commit.
+concurrency:
+  group: deploy
+  cancel-in-progress: true
+
+permissions:
+  contents: write
+  packages: write
+
+jobs:
+  build-and-push:
+    name: Build & Push Container Image
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: true
+          # :latest serves a local `docker compose up` from master; the deploy
+          # branch always pins the sha.
+          tags: |
+            ghcr.io/${{ github.repository }}:${{ github.sha }}
+            ghcr.io/${{ github.repository }}:latest
+
+  update-deploy-branch:
+    name: Update Deploy Branch & Trigger Portainer
+    needs: build-and-push
+    runs-on: ubuntu-latest
+    # Job-level: a step's own `env:` is not yet visible to that step's `if`, and
+    # the `secrets` context is not allowed in a step `if` at all.
+    env:
+      PORTAINER_WEBHOOK: ${{ secrets.PORTAINER_REDEPLOY_HOOK }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Configure Git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      # The deploy branch is master plus one commit pinning the image tag; it is
+      # rebuilt from master on every run, hence the force push.
+      - name: Pin the image tag on the deploy branch
+        env:
+          IMAGE: ghcr.io/${{ github.repository }}:${{ github.sha }}
+          SHA: ${{ github.sha }}
+        run: |
+          git checkout -B deploy
+          sed -i -E "s|image: ghcr.io/[^:]+:.*|image: ${IMAGE}|" docker-compose.yml
+          git add docker-compose.yml
+          git commit -m "Deploy commit ${SHA} [skip ci]" || echo "No changes to commit"
+          git push origin deploy --force
+
+      # Optional: without the secret the deploy branch is still updated, and
+      # Portainer can poll it instead.
+      - name: Trigger Portainer redeploy
+        if: ${{ env.PORTAINER_WEBHOOK != '' }}
+        uses: distributhor/workflow-webhook@2381f0e9c7b6bf061fb1405bd0804b8706116369 # v3.0.8
+        with:
+          webhook_url: ${{ secrets.PORTAINER_REDEPLOY_HOOK }}

@@ -1,0 +1,75 @@
+services:
+  gcalendar-recording-bot:
+    # Placeholder tag. .github/workflows/deploy.yml rewrites this line with the
+    # commit SHA on the `deploy` branch, which is the branch Portainer watches.
+    image: ghcr.io/korjavin/gcalendar-recording-bot:latest
+    # Every variable config.go reads except LISTEN_ADDR and DATA_DIR, which the
+    # image fixes (:8080, /data), passed through by name: Compose takes the
+    # values from .env next to this file, or from the stack environment when
+    # Portainer deploys this repo as a git stack. A variable left unset is not
+    # passed, so the default stands. See .env.example.
+    environment:
+      - PUBLIC_URL
+      - LOG_LEVEL
+      - GOOGLE_CLIENT_ID
+      - GOOGLE_CLIENT_SECRET
+      - TOKEN_KEY
+      - ALLOWED_EMAIL_DOMAINS
+      - BOT_INVITE_EMAIL
+      - BOT_DISPLAY_NAME
+      - JITSI_BASE_URL
+      - JITSI_RECORDER_URL
+      - MEET_RECORDER_URL
+      - RECORDER_SECRET
+      - WEBHOOK_URL
+      - WEBHOOK_SECRET
+      - SMTP_HOST
+      - SMTP_PORT
+      - SMTP_USER
+      - SMTP_PASSWORD
+      - SMTP_FROM
+      - POLL_INTERVAL_S
+      - JOIN_LEAD_S
+      - JOIN_TIMEOUT_S
+      - OVERRUN_S
+      - EMPTY_GRACE_S
+      - MIN_RECORDING_S
+    volumes:
+      # Connections (encrypted refresh tokens) and job state; never audio.
+      - gcalendar-recording-bot-data:/data
+    # No ports: Traefik fronts the bot on ${DOMAIN}; it reaches the recorders
+    # over the same shared network.
+    networks:
+      - traefik
+    labels:
+      - "traefik.enable=true"
+      - "traefik.docker.network=${TRAEFIK_NETWORK_NAME:-traefik}"
+
+      # HTTPS router. /events and /notify are HMAC-signed callbacks: recorders
+      # and the transcriber post to PUBLIC_URL, which is this host.
+      - "traefik.http.routers.gcalendar-recording-bot.rule=Host(`${DOMAIN}`) && (Path(`/`) || Path(`/connect`) || Path(`/oauth/callback`) || Path(`/events`) || Path(`/notify`) || Path(`/health`))"
+      - "traefik.http.routers.gcalendar-recording-bot.entrypoints=websecure"
+      - "traefik.http.routers.gcalendar-recording-bot.tls=true"
+      - "traefik.http.routers.gcalendar-recording-bot.tls.certresolver=${TRAEFIK_CERTRESOLVER:-myresolver}"
+
+      # HTTP -> HTTPS redirect router
+      - "traefik.http.routers.gcalendar-recording-bot-http.rule=Host(`${DOMAIN}`)"
+      - "traefik.http.routers.gcalendar-recording-bot-http.entrypoints=web"
+      - "traefik.http.routers.gcalendar-recording-bot-http.middlewares=gcalendar-recording-bot-https"
+      - "traefik.http.middlewares.gcalendar-recording-bot-https.redirectscheme.scheme=https"
+      - "traefik.http.middlewares.gcalendar-recording-bot-https.redirectscheme.permanent=true"
+
+      - "traefik.http.services.gcalendar-recording-bot.loadbalancer.server.port=8080"
+      - "traefik.http.services.gcalendar-recording-bot.loadbalancer.healthcheck.path=/health"
+      - "traefik.http.services.gcalendar-recording-bot.loadbalancer.healthcheck.interval=30s"
+    restart: unless-stopped
+    # ponytail: no container healthcheck, the distroless image has no curl/wget;
+    # Traefik already probes GET /health.
+
+volumes:
+  gcalendar-recording-bot-data:
+
+networks:
+  traefik:
+    external: true
+    name: ${TRAEFIK_NETWORK_NAME:-traefik}
