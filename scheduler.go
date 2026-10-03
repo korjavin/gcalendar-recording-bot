@@ -36,19 +36,14 @@ var errPermanent = errors.New("rejected")
 
 var errBadJob = errors.New("unreadable job file")
 
-// recorderClient never follows a redirect: it would turn the POST into a GET.
-var recorderClient = &http.Client{
+// noRedirectClient posts to recorders and the transcriber. It never follows
+// a redirect: that would turn the POST into a GET.
+var noRedirectClient = &http.Client{
 	Timeout:       30 * time.Second,
 	CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
 }
 
 var jobIDRe = regexp.MustCompile(`^cal-[0-9a-f]{16}$`)
-
-// handOff passes a finished recording to the transcriber.
-// ponytail: log-only stub until the transcriber hand-off is built.
-var handOff = func(cfg *Config, j *job, event []byte) {
-	slog.Info("recording finished; hand-off pending", "job", j.ID)
-}
 
 func readJob(dataDir, id string) (*job, error) {
 	data, err := os.ReadFile(jobPath(dataDir, id))
@@ -186,7 +181,7 @@ func postRecording(ctx context.Context, cfg *Config, j *job) error {
 		return err
 	}
 	for attempt := 0; ; attempt++ {
-		err = postOnce(ctx, base+"/recordings", cfg.RecorderSecret, body)
+		err = postOnce(ctx, base+"/recordings", map[string]string{"x-recorder-signature": sign(cfg.RecorderSecret, body)}, body)
 		if err == nil || errors.Is(err, errPermanent) || attempt >= len(recorderRetries) {
 			return err
 		}
@@ -198,34 +193,51 @@ func postRecording(ctx context.Context, cfg *Config, j *job) error {
 	}
 }
 
-func postOnce(ctx context.Context, u, secret string, body []byte) error {
+// postOnce POSTs body with the given headers; 2xx is success, 5xx and
+// network errors are worth a retry, anything else wraps errPermanent.
+func postOnce(ctx context.Context, u string, hdr map[string]string, body []byte) error {
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, u, bytes.NewReader(body))
 	if err != nil {
 		return err
 	}
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("x-recorder-signature", sign(secret, body))
-	resp, err := recorderClient.Do(req)
+	for k, v := range hdr {
+		req.Header.Set(k, v)
+	}
+	resp, err := noRedirectClient.Do(req)
 	if err != nil {
 		return err
 	}
 	resp.Body.Close()
 	switch { // a redirect is not followed and fails the start
-	case resp.StatusCode < 300: // 202 started, 200 already exists
+	case resp.StatusCode < 300: // recorder: 202 started, 200 already exists
 		return nil
 	case resp.StatusCode >= 500:
-		return fmt.Errorf("recorder status %d", resp.StatusCode)
+		return fmt.Errorf("status %d", resp.StatusCode)
 	default:
-		return fmt.Errorf("recorder status %d: %w", resp.StatusCode, errPermanent)
+		return fmt.Errorf("status %d: %w", resp.StatusCode, errPermanent)
 	}
 }
 
 // recEvent is the part of a recorder event (architecture.md §3.5) read here.
 type recEvent struct {
-	Event     string  `json:"event"`
-	ID        string  `json:"id"`
-	Error     string  `json:"error"`
-	DurationS float64 `json:"duration_s"`
+	Event        string     `json:"event"`
+	ID           string     `json:"id"`
+	Error        string     `json:"error"`
+	DurationS    float64    `json:"duration_s"`
+	StartedAt    string     `json:"started_at"`
+	EndedAt      string     `json:"ended_at"`
+	Participants []string   `json:"participants"`
+	Artifacts    []artifact `json:"artifacts"`
+}
+
+type artifact struct {
+	Kind          string  `json:"kind"`
+	Path          string  `json:"path"`
+	ParticipantID string  `json:"participant_id"`
+	Name          string  `json:"name"`
+	OffsetS       float64 `json:"offset_s"`
+	EndedS        float64 `json:"ended_s"`
 }
 
 // handleEvents is POST /events from the recorders. Events are idempotent on
@@ -268,6 +280,11 @@ func handleEvents(w http.ResponseWriter, r *http.Request, cfg *Config) {
 		}
 	case "recording.finished":
 		j.State = stateFinished
+		if time.Duration(ev.DurationS*float64(time.Second)) >= cfg.MinRecording {
+			// Stored with the state, so a crash before delivery loses nothing:
+			// the startup and hourly sweeps send whatever is still pending.
+			j.Webhook = buildWebhook(cfg, j, &ev)
+		}
 	case "recording.failed":
 		j.State, j.Error = stateFailed, ev.Error
 	default:
@@ -289,10 +306,10 @@ func handleEvents(w http.ResponseWriter, r *http.Request, cfg *Config) {
 	case "recording.waiting_admission":
 		notifier.mailLobby(j.ID, j.Notify, j.Title)
 	case "recording.finished":
-		if time.Duration(ev.DurationS*float64(time.Second)) < cfg.MinRecording {
+		if j.Webhook == nil {
 			notifier.mailTooShort(j.ID, j.Notify, j.Title)
 		} else {
-			handOff(cfg, j, body)
+			go handOff(cfg, j.ID)
 		}
 	case "recording.failed": // a partial recording is never handed off
 		reason := ev.Error

@@ -79,6 +79,7 @@ func webMux(cfg *Config) *http.ServeMux {
 	mux.HandleFunc("GET /connect", func(w http.ResponseWriter, r *http.Request) { handleConnect(w, r, cfg) })
 	mux.HandleFunc("GET /oauth/callback", func(w http.ResponseWriter, r *http.Request) { handleCallback(w, r, cfg) })
 	mux.HandleFunc("POST /events", func(w http.ResponseWriter, r *http.Request) { handleEvents(w, r, cfg) })
+	mux.HandleFunc("POST /notify", func(w http.ResponseWriter, r *http.Request) { handleNotify(w, r, cfg) })
 	return mux
 }
 
