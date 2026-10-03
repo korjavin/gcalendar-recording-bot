@@ -82,7 +82,12 @@ func saveConnection(dataDir string, key []byte, email, refreshToken string, now 
 	if err != nil {
 		return err
 	}
-	path := connectionPath(dataDir, email)
+	return writeFileAtomic(connectionPath(dataDir, email), data)
+}
+
+// writeFileAtomic writes data to path via a temp file + rename, creating the
+// parent directory (0700); the file ends up mode 0600.
+func writeFileAtomic(path string, data []byte) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return err
 	}

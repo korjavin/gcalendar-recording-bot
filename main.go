@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"log/slog"
 	"net/http"
 	"os"
@@ -14,6 +15,8 @@ func main() {
 		os.Exit(1)
 	}
 	slog.SetDefault(slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: cfg.LogLevel})))
+
+	go runPlanner(context.Background(), cfg)
 
 	srv := &http.Server{
 		Addr:              cfg.ListenAddr,
