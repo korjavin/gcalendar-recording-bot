@@ -56,6 +56,9 @@ type fakeRecorder struct {
 func newFakeRecorder(t *testing.T, statuses ...int) *fakeRecorder {
 	f := &fakeRecorder{statuses: statuses}
 	f.Server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/elsewhere" { // a redirect target that would look like success
+			return
+		}
 		if r.Method != "POST" || r.URL.Path != "/recordings" {
 			http.NotFound(w, r)
 			return
@@ -73,6 +76,9 @@ func newFakeRecorder(t *testing.T, statuses ...int) *fakeRecorder {
 		status := http.StatusAccepted
 		if len(f.statuses) > 0 {
 			status, f.statuses = f.statuses[0], f.statuses[1:]
+		}
+		if status/100 == 3 {
+			w.Header().Set("Location", "/elsewhere")
 		}
 		w.WriteHeader(status)
 	}))
@@ -180,6 +186,7 @@ func TestStartFails(t *testing.T) {
 	}{
 		"5xx exhausts retries": {[]int{500, 500, 500}, 3},
 		"4xx is not retried":   {[]int{422}, 1},
+		"redirect fails":       {[]int{302}, 1},
 	} {
 		t.Run(name, func(t *testing.T) {
 			cfg, _, meet, smtp := schedulerSetup(t)
@@ -274,4 +281,20 @@ func TestEventsRejected(t *testing.T) {
 	if st := jobState(t, cfg, "cal-0000000000000002"); st != stateScheduled {
 		t.Errorf("scheduled job touched: %q", st)
 	}
+}
+
+// A recorder event proves the recorder has the job: a start whose answer was
+// lost must not then be failed.
+func TestEventWhileStartingMarksStarted(t *testing.T) {
+	cfg, _, _, smtp := schedulerSetup(t)
+	const id = "cal-0000000000000001"
+	putJob(t, cfg, id, stateStarting, meetLink, time.Now())
+	if code := postEvent(cfg, `{"event":"recording.started","id":"`+id+`"}`, ""); code != 200 {
+		t.Fatalf("status %d", code)
+	}
+	finishStart(cfg, &job{ID: id}, errPermanent)
+	if st := jobState(t, cfg, id); st != stateStarted {
+		t.Errorf("state %q, want started", st)
+	}
+	smtp.none(t)
 }

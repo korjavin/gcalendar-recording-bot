@@ -36,6 +36,12 @@ var errPermanent = errors.New("rejected")
 
 var errBadJob = errors.New("unreadable job file")
 
+// recorderClient never follows a redirect: it would turn the POST into a GET.
+var recorderClient = &http.Client{
+	Timeout:       30 * time.Second,
+	CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
+}
+
 var jobIDRe = regexp.MustCompile(`^cal-[0-9a-f]{16}$`)
 
 // handOff passes a finished recording to the transcriber.
@@ -198,12 +204,12 @@ func postOnce(ctx context.Context, u, secret string, body []byte) error {
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("x-recorder-signature", sign(secret, body))
-	resp, err := httpClient.Do(req)
+	resp, err := recorderClient.Do(req)
 	if err != nil {
 		return err
 	}
 	resp.Body.Close()
-	switch {
+	switch { // a redirect is not followed and fails the start
 	case resp.StatusCode < 300: // 202 started, 200 already exists
 		return nil
 	case resp.StatusCode >= 500:
@@ -256,6 +262,9 @@ func handleEvents(w http.ResponseWriter, r *http.Request, cfg *Config) {
 
 	switch ev.Event {
 	case "recording.waiting_admission", "recording.started":
+		if j.State == stateStarting { // the recorder has the job even if its POST answer was lost
+			j.State = stateStarted
+		}
 	case "recording.finished":
 		j.State = stateFinished
 	case "recording.failed":
