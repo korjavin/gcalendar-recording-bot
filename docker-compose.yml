@@ -2,7 +2,7 @@ services:
   gcalendar-recording-bot:
     # Placeholder tag. .github/workflows/deploy.yml rewrites this line with the
     # commit SHA on the `deploy` branch, which is the branch Portainer watches.
-    image: ghcr.io/korjavin/gcalendar-recording-bot:latest
+    image: ghcr.io/korjavin/gcalendar-recording-bot:e0725d552984d03210a9712a289b5d76f40fa778
     # Every variable config.go reads except LISTEN_ADDR and DATA_DIR, which the
     # image fixes (:8080, /data), passed through by name: Compose takes the
     # values from .env next to this file, or from the stack environment when
