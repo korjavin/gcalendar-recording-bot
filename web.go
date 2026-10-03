@@ -42,27 +42,27 @@ var pageTmpl = template.Must(template.New("page").Parse(`<!doctype html>
 <h1>{{.Name}}</h1>
 {{if .Message}}<p>{{.Message}}</p>{{end}}
 {{if .Home}}
-<p>{{.Name}} records the online meetings you invite it to, has them transcribed,
+<p>{{.Name}} records the online meetings you tag with <b>#note</b>, has them transcribed,
 and e-mails you when the transcript is ready.</p>
 <ol>
 <li>Connect your Google Calendar (read-only access).</li>
-<li>Invite <b>{{.Invite}}</b> to any meeting with a Google Meet or Jitsi link that you want recorded.</li>
+<li>Write <b>#note</b> in the title or description of any meeting you organize with a Google Meet or Jitsi link that you want recorded.</li>
 </ol>
 <p><a href="/connect">Connect Google Calendar</a></p>
 {{else}}
-<p>Invite <b>{{.Invite}}</b> to meetings you want recorded.</p>
+<p>Write <b>#note</b> in the title or description of meetings you want recorded.</p>
 <p><a href="/">Back</a></p>
 {{end}}
 </body></html>
 `))
 
 type page struct {
-	Name, Invite, Message string
-	Home                  bool
+	Name, Message string
+	Home          bool
 }
 
 func render(w http.ResponseWriter, cfg *Config, status int, p page) {
-	p.Name, p.Invite = cfg.BotDisplayName, cfg.BotInviteEmail
+	p.Name = cfg.BotDisplayName
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.WriteHeader(status)
 	if err := pageTmpl.Execute(w, p); err != nil {

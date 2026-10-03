@@ -72,10 +72,10 @@ in-process fake for SMTP.
 
 ## Architecture Overview
 
-Records meetings people invite it to. A person connects their Google Calendar
+Records meetings people tag with #note. A person connects their Google Calendar
 through the bot's web page (OAuth, read-only); every meeting in a connected
-calendar that has a Meet/Jitsi link and the bot's invite address among its
-attendees is recorded by the matching recorder service, handed to the
+calendar that has a Meet/Jitsi link and #note in its title, description or
+location is recorded by the matching recorder service, handed to the
 transcriber, and the person gets e-mails about it.
 
 - `docs/design.md` — this service: connect flow, which meetings, polling,

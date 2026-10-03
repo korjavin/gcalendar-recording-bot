@@ -46,7 +46,6 @@ func testConfig(t *testing.T) *Config {
 		GoogleClientSecret:  "secret",
 		TokenKey:            bytes.Repeat([]byte{7}, 32),
 		AllowedEmailDomains: []string{"example.com"},
-		BotInviteEmail:      "notetaker@example.com",
 		BotDisplayName:      "NoteTaker",
 	}
 }
@@ -114,7 +113,7 @@ func TestCallback(t *testing.T) {
 
 	rec := callback(cfg, "s1", "s1", "good-code")
 	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "Connected as alice@example.com") ||
-		!strings.Contains(rec.Body.String(), "notetaker@example.com") {
+		!strings.Contains(rec.Body.String(), "#note") {
 		t.Fatalf("happy path: %d %s", rec.Code, rec.Body)
 	}
 	c, plain := readConnection(t, cfg, "alice@example.com")
@@ -188,7 +187,7 @@ func TestHomePage(t *testing.T) {
 	rec := httptest.NewRecorder()
 	webMux(testConfig(t)).ServeHTTP(rec, httptest.NewRequest("GET", "/", nil))
 	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `href="/connect"`) ||
-		!strings.Contains(rec.Body.String(), "notetaker@example.com") {
+		!strings.Contains(rec.Body.String(), "#note") {
 		t.Fatalf("home: %d %s", rec.Code, rec.Body)
 	}
 }

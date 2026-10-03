@@ -68,8 +68,7 @@ type calEvent struct {
 	ConferenceData struct {
 		EntryPoints []entryPoint `json:"entryPoints"`
 	} `json:"conferenceData"`
-	Attendees []attendee `json:"attendees"`
-	Start     struct {
+	Start struct {
 		DateTime time.Time `json:"dateTime"`
 	} `json:"start"`
 	End struct {
@@ -80,11 +79,6 @@ type calEvent struct {
 type entryPoint struct {
 	EntryPointType string `json:"entryPointType"`
 	URI            string `json:"uri"`
-}
-
-type attendee struct {
-	Email          string `json:"email"`
-	ResponseStatus string `json:"responseStatus"`
 }
 
 // jobID is the same for every attendee's copy of one occurrence.
@@ -144,16 +138,23 @@ func callURL(ev *calEvent, jitsiBase string) string {
 	return meetURL(ev.HangoutLink)
 }
 
+// noteTagRe matches the #note tag as a whole tag: not #notes, #notebook or a#note.
+var noteTagRe = regexp.MustCompile(`(?i)(^|[^\w#])#note\b`)
+
+// tagged reports whether the organizer marked the event with #note in its
+// title, description or location.
+func tagged(ev *calEvent) bool {
+	return noteTagRe.MatchString(ev.Summary) || noteTagRe.MatchString(html.UnescapeString(ev.Description)) ||
+		noteTagRe.MatchString(ev.Location)
+}
+
 // candidateURL applies the recording rule (design §2) and returns the call
 // link, or "" when the event is not recorded.
-func candidateURL(ev *calEvent, botEmail, jitsiBase string) string {
+func candidateURL(ev *calEvent, jitsiBase string) string {
 	if ev.Status == "cancelled" || ev.ICalUID == "" || ev.Start.DateTime.IsZero() {
 		return "" // all-day events have no dateTime and no call time
 	}
-	invited := slices.ContainsFunc(ev.Attendees, func(a attendee) bool {
-		return strings.EqualFold(a.Email, botEmail) && a.ResponseStatus != "declined"
-	})
-	if !invited {
+	if !tagged(ev) {
 		return ""
 	}
 	return callURL(ev, jitsiBase)
@@ -248,7 +249,7 @@ func pollConnection(ctx context.Context, cfg *Config, data []byte, now time.Time
 	}
 	for i := range events {
 		ev := &events[i]
-		u := candidateURL(ev, cfg.BotInviteEmail, cfg.JitsiBaseURL)
+		u := candidateURL(ev, cfg.JitsiBaseURL)
 		if u == "" {
 			continue
 		}

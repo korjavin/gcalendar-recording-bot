@@ -17,12 +17,10 @@ import (
 	"time"
 )
 
-const bot = "notetaker@example.com"
 const jitsiBase = "https://jitsi.example.com"
 
 func ev(mod func(*calEvent)) *calEvent {
-	e := &calEvent{ICalUID: "uid-1@google.com", Status: "confirmed", Summary: "Weekly",
-		Attendees: []attendee{{Email: "alice@example.com"}, {Email: "NoteTaker@Example.com", ResponseStatus: "needsAction"}}}
+	e := &calEvent{ICalUID: "uid-1@google.com", Status: "confirmed", Summary: "Weekly #note"}
 	e.Start.DateTime = time.Date(2026, 10, 3, 10, 0, 0, 0, time.UTC)
 	e.End.DateTime = e.Start.DateTime.Add(time.Hour)
 	if mod != nil {
@@ -45,8 +43,23 @@ func TestCandidateURL(t *testing.T) {
 		ev   *calEvent
 		want string
 	}{
-		{"no invite", ev(func(e *calEvent) { e.Attendees = e.Attendees[:1]; e.HangoutLink = meet }), ""},
-		{"bot declined", ev(func(e *calEvent) { e.Attendees[1].ResponseStatus = "declined"; e.HangoutLink = meet }), ""},
+		{"no tag", ev(func(e *calEvent) { e.Summary = "Weekly"; e.HangoutLink = meet }), ""},
+		{"#notes", ev(func(e *calEvent) { e.Summary = "Weekly #notes"; e.HangoutLink = meet }), ""},
+		{"#notebook", ev(func(e *calEvent) { e.Summary = "#notebook review"; e.HangoutLink = meet }), ""},
+		{"tag inside a word", ev(func(e *calEvent) { e.Summary = "a#note"; e.HangoutLink = meet }), ""},
+		{"double hash", ev(func(e *calEvent) { e.Summary = "##note"; e.HangoutLink = meet }), ""},
+		{"tag at title start", ev(func(e *calEvent) { e.Summary = "#note: weekly"; e.HangoutLink = meet }), meet},
+		{"tag in description, HTML, other case", ev(func(e *calEvent) {
+			e.Summary = "Weekly"
+			e.Description = "Agenda<br><b>#NOTE</b>&nbsp;please"
+			e.HangoutLink = meet
+		}), meet},
+		{"escaped tag inside a word in description", ev(func(e *calEvent) {
+			e.Summary = "Weekly"
+			e.Description = "x&#35;note"
+			e.HangoutLink = meet
+		}), ""},
+		{"tag in location", ev(func(e *calEvent) { e.Summary = "Weekly"; e.Location = "Room 1 (#Note)"; e.HangoutLink = meet }), meet},
 		{"cancelled", ev(func(e *calEvent) { e.Status = "cancelled"; e.HangoutLink = meet }), ""},
 		{"no link", ev(nil), ""},
 		{"all-day", ev(func(e *calEvent) { e.Start.DateTime = time.Time{}; e.HangoutLink = meet }), ""},
@@ -68,12 +81,12 @@ func TestCandidateURL(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := candidateURL(tt.ev, bot, jitsiBase); got != tt.want {
+			if got := candidateURL(tt.ev, jitsiBase); got != tt.want {
 				t.Errorf("candidateURL = %q, want %q", got, tt.want)
 			}
 		})
 	}
-	if got := candidateURL(ev(func(e *calEvent) { e.Description = "https://jitsi.example.com/Room" }), bot, ""); got != "" {
+	if got := candidateURL(ev(func(e *calEvent) { e.Description = "https://jitsi.example.com/Room" }), ""); got != "" {
 		t.Errorf("jitsi without JITSI_BASE_URL = %q, want empty", got)
 	}
 }
@@ -167,8 +180,8 @@ func (f *fakeCalendar) set(refresh string, evs ...map[string]any) {
 func apiEvent(uid string, start time.Time, mod func(map[string]any)) map[string]any {
 	e := map[string]any{
 		"iCalUID": uid, "status": "confirmed", "summary": "Sync " + uid,
+		"description": "Agenda #note",
 		"hangoutLink": "https://meet.google.com/abc-defg-hij",
-		"attendees":   []map[string]string{{"email": "alice@example.com"}, {"email": bot}},
 		"start":       map[string]string{"dateTime": start.Format(time.RFC3339)},
 		"end":         map[string]string{"dateTime": start.Add(time.Hour).Format(time.RFC3339)},
 	}
@@ -224,11 +237,11 @@ func TestPollMergesPaginatesAndReconciles(t *testing.T) {
 	connect(t, cfg, "bob@example.com", "rt-bob")
 
 	// Bob sees the shared meeting in his own time zone; Alice's calendar has
-	// three pages, one of which does not invite the bot.
+	// three pages, one of which is untagged.
 	shared := apiEvent("shared@google.com", t1, nil)
 	f.set("rt-alice", shared,
 		apiEvent("solo@google.com", t2, nil),
-		apiEvent("other@google.com", t2, func(e map[string]any) { e["attendees"] = []map[string]string{{"email": "alice@example.com"}} }))
+		apiEvent("other@google.com", t2, func(e map[string]any) { e["description"] = "Agenda" }))
 	f.set("rt-bob", apiEvent("shared@google.com", t1.In(time.FixedZone("X", -5*3600)), nil))
 
 	poll(t, cfg, now)
@@ -248,14 +261,14 @@ func TestPollMergesPaginatesAndReconciles(t *testing.T) {
 		t.Errorf("events.list pages fetched = %d, want 4 (3 alice + 1 bob)", f.pages)
 	}
 
-	// The solo meeting moves (new id), Bob un-invites the bot from his copy
-	// (Alice's copy still invites it), a started job stays untouched.
+	// The solo meeting moves (new id), Bob's copy comes back untagged
+	// (Alice's copy is still tagged), a started job stays untouched.
 	started := job{ID: "cal-started0000000", State: "recording", Title: "x"}
 	data, _ := json.Marshal(started)
 	writeFileAtomic(jobPath(cfg.DataDir, started.ID), data)
 	f.set("rt-alice", shared, apiEvent("solo@google.com", t2.Add(30*time.Minute), nil))
 	f.set("rt-bob", apiEvent("shared@google.com", t1, func(e map[string]any) {
-		e["attendees"] = []map[string]string{{"email": "bob@example.com"}}
+		e["description"] = "Agenda"
 	}))
 	poll(t, cfg, now)
 	got = jobs(t, cfg)
@@ -267,7 +280,7 @@ func TestPollMergesPaginatesAndReconciles(t *testing.T) {
 		t.Error("moved occurrence not scheduled")
 	}
 	if j := got[sharedID]; !slices.Equal(j.Notify, []string{"alice@example.com"}) {
-		t.Errorf("shared notify after bob uninvited = %v", j.Notify)
+		t.Errorf("shared notify after bob untagged = %v", j.Notify)
 	}
 	if j := got[started.ID]; j.State != "recording" {
 		t.Errorf("started job touched: %+v", j)
@@ -372,7 +385,7 @@ func TestPollLogs(t *testing.T) {
 	connect(t, cfg, "alice@example.com", "rt-alice")
 	connect(t, cfg, "bob@example.com", "rt-bob")
 	f.set("rt-alice", apiEvent("a@google.com", t1, nil),
-		apiEvent("b@google.com", t1, func(e map[string]any) { e["attendees"] = []map[string]string{{"email": "alice@example.com"}} }))
+		apiEvent("b@google.com", t1, func(e map[string]any) { e["description"] = "Agenda" }))
 	f.mu.Lock()
 	f.deny["at-rt-bob"] = true
 	f.mu.Unlock()
