@@ -435,6 +435,9 @@ func reconcile(dataDir string, cands map[string]*job, complete bool) error {
 		}
 		if err := writeFileAtomic(jobPath(dataDir, id), data); err != nil {
 			errs = append(errs, err)
+			if old == nil {
+				total-- // never persisted
+			}
 			continue
 		}
 		scheduled++
