@@ -139,7 +139,8 @@ func callURL(ev *calEvent, jitsiBase string) string {
 }
 
 // noteTagRe matches the #note tag as a whole tag: not #notes, #notebook or a#note.
-var noteTagRe = regexp.MustCompile(`(?i)(^|[^\w#])#note\b`)
+// Boundaries are Unicode letters and digits (\w and \b are ASCII-only in Go).
+var noteTagRe = regexp.MustCompile(`(?i)(^|[^\p{L}\p{N}_#])#note($|[^\p{L}\p{N}_])`)
 
 // tagged reports whether the organizer marked the event with #note in its
 // title, description or location.

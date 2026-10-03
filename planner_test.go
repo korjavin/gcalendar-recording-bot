@@ -48,6 +48,9 @@ func TestCandidateURL(t *testing.T) {
 		{"#notebook", ev(func(e *calEvent) { e.Summary = "#notebook review"; e.HangoutLink = meet }), ""},
 		{"tag inside a word", ev(func(e *calEvent) { e.Summary = "a#note"; e.HangoutLink = meet }), ""},
 		{"double hash", ev(func(e *calEvent) { e.Summary = "##note"; e.HangoutLink = meet }), ""},
+		{"non-ASCII letter before", ev(func(e *calEvent) { e.Summary = "é#note"; e.HangoutLink = meet }), ""},
+		{"non-ASCII letter after", ev(func(e *calEvent) { e.Summary = "#noteé"; e.HangoutLink = meet }), ""},
+		{"tag at title end", ev(func(e *calEvent) { e.Summary = "Weekly, #note"; e.HangoutLink = meet }), meet},
 		{"tag at title start", ev(func(e *calEvent) { e.Summary = "#note: weekly"; e.HangoutLink = meet }), meet},
 		{"tag in description, HTML, other case", ev(func(e *calEvent) {
 			e.Summary = "Weekly"
