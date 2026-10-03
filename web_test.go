@@ -176,6 +176,8 @@ func TestCallbackNoCalendarScope(t *testing.T) {
 	cfg := testConfig(t)
 	if rec := callback(cfg, "s1", "s1", "good-code"); rec.Code != http.StatusBadRequest {
 		t.Fatalf("status %d, want 400", rec.Code)
+	} else if !strings.Contains(rec.Body.String(), "keep the calendar permission ticked") {
+		t.Errorf("page does not explain the missing permission:\n%s", rec.Body.String())
 	}
 	if _, err := os.Stat(cfg.DataDir + "/connections"); !os.IsNotExist(err) {
 		t.Fatal("connection stored without calendar scope")

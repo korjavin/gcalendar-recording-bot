@@ -1,8 +1,10 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -100,11 +102,12 @@ type fakeCalendar struct {
 	mu     sync.Mutex
 	events map[string][]map[string]any // by access token
 	fail   map[string]bool             // access tokens whose events.list returns 500
+	deny   map[string]bool             // access tokens whose events.list returns 403 accessNotConfigured
 	pages  int
 }
 
 func newFakeCalendar(t *testing.T) *fakeCalendar {
-	f := &fakeCalendar{events: map[string][]map[string]any{}, fail: map[string]bool{}}
+	f := &fakeCalendar{events: map[string][]map[string]any{}, fail: map[string]bool{}, deny: map[string]bool{}}
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /token", func(w http.ResponseWriter, r *http.Request) {
 		r.ParseForm()
@@ -128,6 +131,12 @@ func newFakeCalendar(t *testing.T) *fakeCalendar {
 		at := r.Header.Get("Authorization")[len("Bearer "):]
 		if f.fail[at] {
 			http.Error(w, "boom", http.StatusInternalServerError)
+			return
+		}
+		if f.deny[at] {
+			w.WriteHeader(http.StatusForbidden)
+			w.Write([]byte(`{"error":{"code":403,"message":"Google Calendar API has not been used in project 123 before or it is disabled.",` +
+				`"errors":[{"message":"Google Calendar API has not been used","domain":"usageLimits","reason":"accessNotConfigured"}],"status":"PERMISSION_DENIED"}}`))
 			return
 		}
 		evs := f.events[at]
@@ -344,5 +353,59 @@ func TestDropConnectionKeepsReplacedConnection(t *testing.T) {
 	cur, _ := os.ReadFile(path)
 	if !dropConnection(path, cur) {
 		t.Fatal("unchanged connection not dropped")
+	}
+}
+
+// captureLogs routes slog to a buffer for the rest of the test.
+func captureLogs(t *testing.T) *bytes.Buffer {
+	var buf bytes.Buffer
+	old := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&buf, nil)))
+	t.Cleanup(func() { slog.SetDefault(old) })
+	return &buf
+}
+
+func TestPollLogs(t *testing.T) {
+	cfg, f := plannerSetup(t)
+	now := time.Date(2026, 10, 3, 8, 0, 0, 0, time.UTC)
+	t1 := now.Add(time.Hour)
+	connect(t, cfg, "alice@example.com", "rt-alice")
+	connect(t, cfg, "bob@example.com", "rt-bob")
+	f.set("rt-alice", apiEvent("a@google.com", t1, nil),
+		apiEvent("b@google.com", t1, func(e map[string]any) { e["attendees"] = []map[string]string{{"email": "alice@example.com"}} }))
+	f.mu.Lock()
+	f.deny["at-rt-bob"] = true
+	f.mu.Unlock()
+	alice, bobFull := emailHash("alice@example.com")[:12], emailHash("bob@example.com")
+	id := jobID("a@google.com", t1)
+
+	logs := captureLogs(t)
+	poll(t, cfg, now)
+	out := logs.String()
+	for _, want := range []string{
+		`msg="connection polled" connection=` + alice + ` events=2 candidates=1`,
+		`msg="poll connection failed" connection=` + bobFull[:12] + ` err="events.list status 403: accessNotConfigured: Google Calendar API has not been used`,
+		`msg="job scheduled" job=` + id + ` start=` + t1.Format("2006-01-02T15:04:05.000Z07:00") + ` kind=meet new=true`,
+		`msg="poll done" jobs_scheduled=1 jobs_dropped=0 jobs_total=1 complete=false`,
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("log lacks %q:\n%s", want, out)
+		}
+	}
+	for _, leak := range []string{bobFull, "@example.com", "Sync", "meet.google.com", "at-rt-"} {
+		if strings.Contains(out, leak) {
+			t.Errorf("log leaks %q:\n%s", leak, out)
+		}
+	}
+
+	// A complete poll with the meeting gone drops the job.
+	f.mu.Lock()
+	f.deny["at-rt-bob"] = false
+	f.mu.Unlock()
+	f.set("rt-alice")
+	logs.Reset()
+	poll(t, cfg, now)
+	if want := `msg="poll done" jobs_scheduled=0 jobs_dropped=1 jobs_total=0 complete=true`; !strings.Contains(logs.String(), want) {
+		t.Errorf("log lacks %q:\n%s", want, logs.String())
 	}
 }
