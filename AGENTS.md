@@ -125,3 +125,48 @@ bd prime                # Refresh Beads context
 
 **Architecture in one line:** issues live in a local Dolt DB; sync uses `refs/dolt/data` on your git remote; `.beads/issues.jsonl` is a passive export. See https://github.com/gastownhall/beads/blob/main/docs/core-concepts/sync-concepts.md for details and anti-patterns.
 <!-- END BEADS CODEX SETUP -->
+
+
+## Build & Test
+
+```bash
+gofmt -l . && go vet ./... && go test -race ./...
+docker build -t gcalendar-recording-bot .
+```
+
+Unit tests must pass offline: no network, no Google, no SMTP server, no
+recorder, no transcriber. Use `net/http/httptest` for every HTTP boundary
+(Google OAuth + Calendar API, fake recorders, fake transcriber) and an
+in-process fake for SMTP.
+
+## Architecture Overview
+
+Records meetings people invite it to. A person connects their Google Calendar
+through the bot's web page (OAuth, read-only); every meeting in a connected
+calendar that has a Meet/Jitsi link and the bot's invite address among its
+attendees is recorded by the matching recorder service, handed to the
+transcriber, and the person gets e-mails about it.
+
+- `docs/design.md` — this service: connect flow, which meetings, polling,
+  scheduling, e-mail, endpoints.
+- `docs/architecture.md` — the system contract shared with
+  `korjavin/zulip-recording-bot` (canonical copy there), `jitsi-recorder` and
+  `meet-recorder`. Do not change it here.
+
+- Go `package main` at the repo root, flat files, **stdlib only** — no
+  dependencies (no go.sum): OAuth and the Calendar API are plain `net/http` +
+  `encoding/json`, mail is `net/smtp`, templates are `html/template`, token
+  encryption is `crypto/aes` + `crypto/cipher`.
+- Configuration is env-only; `config.go` is the single reader of `os.Getenv`.
+
+## Conventions & Patterns
+
+- **English only** in every public artifact: README, docs, code comments,
+  commit messages, PR bodies, `.env.example`.
+- **Public repo:** never commit real domains, emails, keys, calendar data or
+  user data. Use placeholders (`example.com`, `notetaker@example.com`).
+- Never log secrets, tokens or e-mail bodies — log the variable NAME, a job id,
+  or a hashed e-mail. Never log a full meeting URL (it may carry a token).
+- Docs describe this service as designed from scratch: never reference the
+  repositories or code it was derived from. Bead descriptions may name a source
+  to copy from; the README and docs must not.

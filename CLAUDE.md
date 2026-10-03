@@ -60,18 +60,44 @@ This protocol applies when ending a Beads implementation workflow. It is subordi
 
 ## Build & Test
 
-_Add your build and test commands here_
-
 ```bash
-# Example:
-# npm install
-# npm test
+gofmt -l . && go vet ./... && go test -race ./...
+docker build -t gcalendar-recording-bot .
 ```
+
+Unit tests must pass offline: no network, no Google, no SMTP server, no
+recorder, no transcriber. Use `net/http/httptest` for every HTTP boundary
+(Google OAuth + Calendar API, fake recorders, fake transcriber) and an
+in-process fake for SMTP.
 
 ## Architecture Overview
 
-_Add a brief overview of your project architecture_
+Records meetings people invite it to. A person connects their Google Calendar
+through the bot's web page (OAuth, read-only); every meeting in a connected
+calendar that has a Meet/Jitsi link and the bot's invite address among its
+attendees is recorded by the matching recorder service, handed to the
+transcriber, and the person gets e-mails about it.
+
+- `docs/design.md` — this service: connect flow, which meetings, polling,
+  scheduling, e-mail, endpoints.
+- `docs/architecture.md` — the system contract shared with
+  `korjavin/zulip-recording-bot` (canonical copy there), `jitsi-recorder` and
+  `meet-recorder`. Do not change it here.
+
+- Go `package main` at the repo root, flat files, **stdlib only** — no
+  dependencies (no go.sum): OAuth and the Calendar API are plain `net/http` +
+  `encoding/json`, mail is `net/smtp`, templates are `html/template`, token
+  encryption is `crypto/aes` + `crypto/cipher`.
+- Configuration is env-only; `config.go` is the single reader of `os.Getenv`.
 
 ## Conventions & Patterns
 
-_Add your project-specific conventions here_
+- **English only** in every public artifact: README, docs, code comments,
+  commit messages, PR bodies, `.env.example`.
+- **Public repo:** never commit real domains, emails, keys, calendar data or
+  user data. Use placeholders (`example.com`, `notetaker@example.com`).
+- Never log secrets, tokens or e-mail bodies — log the variable NAME, a job id,
+  or a hashed e-mail. Never log a full meeting URL (it may carry a token).
+- Docs describe this service as designed from scratch: never reference the
+  repositories or code it was derived from. Bead descriptions may name a source
+  to copy from; the README and docs must not.
