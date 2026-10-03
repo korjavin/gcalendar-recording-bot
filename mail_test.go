@@ -7,6 +7,7 @@ import (
 	"encoding/base64"
 	"io"
 	"mime"
+	"mime/quotedprintable"
 	"net"
 	"net/http/httptest"
 	"net/mail"
@@ -191,8 +192,14 @@ func TestMailHeaders(t *testing.T) {
 
 func TestMailEncodedSubject(t *testing.T) {
 	f := newFakeSMTP(t, 0)
-	f.mailer(t).mailTranscript("job-2", []string{"a@example.com"}, "Встреча über alles", "line 1\n.\nline 3\n")
+	long := strings.Repeat("Ä word ", 500) // one 3500-byte line
+	f.mailer(t).mailTranscript("job-2", []string{"a@example.com"}, "Встреча über alles", "line 1\n.\n"+long+"\n")
 	got := f.wait(t)
+	for _, l := range strings.Split(got.data, "\r\n") {
+		if len(l) > 998 {
+			t.Fatalf("line of %d bytes on the wire", len(l))
+		}
+	}
 	msg, err := mail.ReadMessage(strings.NewReader(got.data))
 	if err != nil {
 		t.Fatal(err)
@@ -204,7 +211,8 @@ func TestMailEncodedSubject(t *testing.T) {
 	if s, err := new(mime.WordDecoder).DecodeHeader(raw); err != nil || s != "Transcript ready: Встреча über alles" {
 		t.Errorf("decoded subject = %q, %v", s, err)
 	}
-	if body, _ := io.ReadAll(msg.Body); string(body) != "line 1\r\n..\r\nline 3\r\n" { // dot-stuffed on the wire
+	body, _ := io.ReadAll(quotedprintable.NewReader(msg.Body))
+	if want := "line 1\r\n..\r\n" + long + "\r\n"; string(body) != want { // ".." : still dot-stuffed on the wire
 		t.Errorf("body = %q", body)
 	}
 }

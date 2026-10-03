@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"log/slog"
 	"mime"
+	"mime/quotedprintable"
 	"net"
 	"net/mail"
 	"net/smtp"
@@ -114,12 +115,22 @@ func (m *mailer) compose(to []string, subject, body string, now time.Time) []byt
 	fmt.Fprintf(&b, "Date: %s\r\n", now.Format(time.RFC1123Z))
 	fmt.Fprintf(&b, "Message-ID: <%s@%s>\r\n", hex.EncodeToString(id), domain)
 	fmt.Fprintf(&b, "From: %s\r\n", m.from)
-	fmt.Fprintf(&b, "To: %s\r\n", strings.Join(to, ", "))
-	fmt.Fprintf(&b, "Subject: %s\r\n", mime.QEncoding.Encode("utf-8", oneLine(subject)))
+	// Headers stay under SMTP's 998-byte line limit: one address per folded
+	// line, encoded words on their own lines, the subject capped.
+	fmt.Fprintf(&b, "To: %s\r\n", strings.Join(to, ",\r\n "))
+	subj := []rune(oneLine(subject))
+	if len(subj) > 200 { // ponytail: plain cap, titles this long are noise anyway
+		subj = append(subj[:199], '…')
+	}
+	enc := mime.QEncoding.Encode("utf-8", string(subj))
+	fmt.Fprintf(&b, "Subject: %s\r\n", strings.ReplaceAll(enc, "?= =?", "?=\r\n =?"))
 	b.WriteString("MIME-Version: 1.0\r\n")
 	b.WriteString("Content-Type: text/plain; charset=utf-8\r\n")
-	b.WriteString("Content-Transfer-Encoding: 8bit\r\n\r\n")
-	b.WriteString(body) // the DATA writer turns \n into \r\n and dot-stuffs
+	b.WriteString("Content-Transfer-Encoding: quoted-printable\r\n\r\n")
+	// Quoted-printable: 7-bit safe and wraps long lines; the DATA writer dot-stuffs.
+	qp := quotedprintable.NewWriter(&b)
+	qp.Write([]byte(body))
+	qp.Close()
 	return []byte(b.String())
 }
 
