@@ -17,7 +17,7 @@ import (
 )
 
 // fakeSMTP speaks just enough SMTP: EHLO, STARTTLS, AUTH PLAIN, MAIL, RCPT,
-// DATA, QUIT. The first failMail MAIL commands get a 451.
+// DATA, QUIT. The first failMail MAIL commands get a 451; RCPT bad@… a 550.
 type fakeSMTP struct {
 	ln       net.Listener
 	tls      *tls.Config
@@ -97,6 +97,8 @@ func (f *fakeSMTP) serve(c net.Conn) {
 			}
 			m.from = line
 			say("250 ok")
+		case cmd == "RCPT" && strings.Contains(line, "bad@"):
+			say("550 no such user")
 		case cmd == "RCPT":
 			m.to = append(m.to, line)
 			say("250 ok")
@@ -223,6 +225,14 @@ func TestMailGivesUpAfterRetries(t *testing.T) {
 	case <-f.got:
 		t.Fatal("delivered after more failures than retries")
 	case <-time.After(300 * time.Millisecond):
+	}
+}
+
+func TestMailRejectedRecipientSkipped(t *testing.T) {
+	f := newFakeSMTP(t, 0)
+	f.mailer(t).mailLobby("job-5", []string{"bad@example.com", "a@example.com"}, "Sync")
+	if got := f.wait(t); len(got.to) != 1 || !strings.Contains(got.to[0], "a@example.com") {
+		t.Errorf("recipients = %q", got.to)
 	}
 }
 

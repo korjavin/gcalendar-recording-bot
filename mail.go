@@ -90,13 +90,17 @@ func (m *mailer) send(job string, to []string, subject, body string) {
 			if err == nil {
 				return
 			}
+			// SMTP reply text often quotes the address, so log only its code.
 			var te *textproto.Error
-			permanent := errors.As(err, &te) && te.Code >= 500
-			if permanent || attempt >= len(m.retries) {
-				slog.Warn("e-mail lost", "job", job, "attempt", attempt+1, "err", err)
+			var logErr any = err
+			if errors.As(err, &te) {
+				logErr = te.Code
+			}
+			if te != nil && te.Code >= 500 || attempt >= len(m.retries) {
+				slog.Warn("e-mail lost", "job", job, "attempt", attempt+1, "err", logErr)
 				return
 			}
-			slog.Info("e-mail retry", "job", job, "attempt", attempt+1, "err", err)
+			slog.Info("e-mail retry", "job", job, "attempt", attempt+1, "err", logErr)
 			time.Sleep(m.retries[attempt])
 		}
 	}()
@@ -151,10 +155,24 @@ func (m *mailer) deliver(to []string, msg []byte) error {
 	if err := c.Mail(m.sender); err != nil {
 		return err
 	}
+	// A mailbox rejected for good must not cost the others their mail;
+	// anything else (4xx, network) fails the attempt so it is retried whole.
+	accepted := 0
+	var rcptErr error
 	for _, r := range to {
-		if err := c.Rcpt(r); err != nil {
+		err := c.Rcpt(r)
+		var te *textproto.Error
+		switch {
+		case err == nil:
+			accepted++
+		case errors.As(err, &te) && te.Code >= 500:
+			rcptErr = err
+		default:
 			return err
 		}
+	}
+	if accepted == 0 {
+		return rcptErr
 	}
 	w, err := c.Data()
 	if err != nil {
@@ -166,7 +184,8 @@ func (m *mailer) deliver(to []string, msg []byte) error {
 	if err := w.Close(); err != nil {
 		return err
 	}
-	return c.Quit()
+	c.Quit() // the message is queued; a lost QUIT reply must not trigger a resend
+	return nil
 }
 
 // oneLine keeps calendar-supplied text from breaking a header.
