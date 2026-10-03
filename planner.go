@@ -124,8 +124,16 @@ func jitsiURL(text, base string) string {
 	return ""
 }
 
-// callURL picks the event's call link: Meet first, then Jitsi.
+// callURL picks the event's call link: an explicit Jitsi link in the location
+// or description wins, because Google Calendar adds a Meet conference to new
+// events on its own; otherwise the Meet link.
 func callURL(ev *calEvent, jitsiBase string) string {
+	if u := jitsiURL(ev.Location, jitsiBase); u != "" {
+		return u
+	}
+	if u := jitsiURL(ev.Description, jitsiBase); u != "" {
+		return u
+	}
 	for _, ep := range ev.ConferenceData.EntryPoints {
 		if ep.EntryPointType == "video" {
 			if u := meetURL(ep.URI); u != "" {
@@ -133,13 +141,7 @@ func callURL(ev *calEvent, jitsiBase string) string {
 			}
 		}
 	}
-	if u := meetURL(ev.HangoutLink); u != "" {
-		return u
-	}
-	if u := jitsiURL(ev.Location, jitsiBase); u != "" {
-		return u
-	}
-	return jitsiURL(ev.Description, jitsiBase)
+	return meetURL(ev.HangoutLink)
 }
 
 // candidateURL applies the recording rule (design §2) and returns the call

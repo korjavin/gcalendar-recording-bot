@@ -31,7 +31,8 @@ An event in a connected calendar is recorded when all hold:
 * `BOT_INVITE_EMAIL` is among its attendees (case-insensitive);
 * it has a call link: Google Meet from `conferenceData` (video entry point) or
   `hangoutLink`, or a Jitsi link under `JITSI_BASE_URL` found in `location` or
-  `description`. Meet wins when both are present.
+  `description`. A Jitsi link wins when both are present: Google Calendar adds a Meet
+  conference to new events on its own, so an explicit Jitsi link is the intent.
 
 One recording per meeting occurrence, even when several attendees connected
 their calendars: the job id is `cal-` + the first 16 hex chars of

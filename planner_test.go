@@ -61,10 +61,10 @@ func TestCandidateURL(t *testing.T) {
 			e.Description = "https://meet.jit.si/Room https://jitsi.example.com.evil.example/Room"
 		}), ""},
 		{"jitsi base without room", ev(func(e *calEvent) { e.Description = "https://jitsi.example.com/" }), ""},
-		{"both links: meet wins", ev(func(e *calEvent) {
+		{"both links: jitsi wins", ev(func(e *calEvent) {
 			e.Description = "https://jitsi.example.com/Room"
 			e.HangoutLink = meet
-		}), meet},
+		}), "https://jitsi.example.com/Room"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
