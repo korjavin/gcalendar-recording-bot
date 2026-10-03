@@ -50,6 +50,9 @@ type job struct {
 
 	Webhook   *webhook `json:"webhook,omitempty"`    // transcriber body, set on an accepted recording.finished
 	HandedOff bool     `json:"handed_off,omitempty"` // the transcriber answered 2xx to Webhook
+
+	Deadline time.Time `json:"deadline,omitzero"` // the watchdog checks a job still running after this
+	Misses   int       `json:"misses,omitempty"`  // watchdog checks in a row that found no job (404 or unreachable)
 }
 
 const stateScheduled = "scheduled"
