@@ -64,13 +64,19 @@ func TestLoadConfigValid(t *testing.T) {
 	if c.PollInterval != 300*time.Second || c.JoinLead != 90*time.Second || c.SMTPPort != 587 {
 		t.Errorf("durations: %v %v %d", c.PollInterval, c.JoinLead, c.SMTPPort)
 	}
+
+	t.Setenv("SMTP_HOST", "") // e-mail disabled: SMTP_FROM not needed either
+	t.Setenv("SMTP_FROM", "")
+	if _, err := loadConfig(); err != nil {
+		t.Errorf("without SMTP_HOST: %v", err)
+	}
 }
 
 func TestLoadConfigMissingRequired(t *testing.T) {
 	for _, name := range []string{
 		"PUBLIC_URL", "GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET", "TOKEN_KEY",
 		"ALLOWED_EMAIL_DOMAINS", "BOT_INVITE_EMAIL", "RECORDER_SECRET",
-		"WEBHOOK_URL", "WEBHOOK_SECRET", "SMTP_HOST", "SMTP_FROM", "MEET_RECORDER_URL",
+		"WEBHOOK_URL", "WEBHOOK_SECRET", "SMTP_FROM", "MEET_RECORDER_URL",
 	} {
 		t.Run(name, func(t *testing.T) {
 			setEnv(t, validEnv())

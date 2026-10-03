@@ -101,11 +101,11 @@ func loadConfig() (*Config, error) {
 		WebhookURL:    required("WEBHOOK_URL"),
 		WebhookSecret: required("WEBHOOK_SECRET"),
 
-		SMTPHost:     required("SMTP_HOST"),
+		SMTPHost:     str("SMTP_HOST", ""), // empty: e-mail disabled
 		SMTPPort:     integer("SMTP_PORT", 587),
 		SMTPUser:     str("SMTP_USER", ""),
 		SMTPPassword: str("SMTP_PASSWORD", ""),
-		SMTPFrom:     required("SMTP_FROM"),
+		SMTPFrom:     str("SMTP_FROM", ""),
 
 		PollInterval: seconds("POLL_INTERVAL_S", 300),
 		JoinLead:     seconds("JOIN_LEAD_S", 90),
@@ -141,6 +141,9 @@ func loadConfig() (*Config, error) {
 	}
 	if c.JitsiRecorderURL != "" && c.JitsiBaseURL == "" {
 		fail("JITSI_BASE_URL is required with JITSI_RECORDER_URL")
+	}
+	if c.SMTPHost != "" && c.SMTPFrom == "" {
+		fail("SMTP_FROM is required with SMTP_HOST")
 	}
 
 	if len(errs) > 0 {
