@@ -32,11 +32,8 @@ var errInvalidGrant = errors.New("invalid_grant")
 // hold it too, so the planner never overwrites a job that has just started.
 var jobsMu sync.Mutex
 
-// sendDisconnected tells a person their calendar was disconnected.
-// ponytail: log-only stub until the e-mail notifier is wired in.
-var sendDisconnected = func(cfg *Config, email string) {
-	slog.Info("calendar disconnected e-mail queued", "email_hash", emailHash(email)[:12])
-}
+// notifier sends every e-mail; main replaces it with the configured mailer.
+var notifier = &mailer{}
 
 // job is DATA_DIR/jobs/<id>/job.json. The planner writes only state
 // "scheduled"; later states belong to the scheduler.
@@ -48,6 +45,8 @@ type job struct {
 	Start  time.Time `json:"start"`
 	End    time.Time `json:"end"`
 	Notify []string  `json:"notify"`
+	Events []string  `json:"events,omitempty"` // recorder events handled, for idempotency
+	Error  string    `json:"error,omitempty"`
 }
 
 const stateScheduled = "scheduled"
@@ -152,13 +151,19 @@ func candidateURL(ev *calEvent, botEmail, jitsiBase string) string {
 	return callURL(ev, jitsiBase)
 }
 
-// runPlanner polls every PollInterval until ctx ends.
-func runPlanner(ctx context.Context, cfg *Config) {
+// runPlanner polls every PollInterval until ctx ends, calling afterFirst
+// once the first poll is over (so stale jobs from before a restart are
+// reconciled before anything starts them).
+func runPlanner(ctx context.Context, cfg *Config, afterFirst func()) {
 	t := time.NewTicker(cfg.PollInterval)
 	defer t.Stop()
 	for {
 		if err := pollOnce(ctx, cfg, time.Now()); err != nil {
 			slog.Error("poll failed", "err", err)
+		}
+		if afterFirst != nil {
+			afterFirst()
+			afterFirst = nil
 		}
 		select {
 		case <-ctx.Done():
@@ -195,7 +200,7 @@ func pollOnce(ctx context.Context, cfg *Config, now time.Time) error {
 		case errors.Is(err, errInvalidGrant):
 			if dropConnection(path, data) {
 				slog.Info("calendar access revoked; connection dropped", "email_hash", emailHash(email)[:12])
-				sendDisconnected(cfg, email)
+				notifier.mailDisconnected(emailHash(email)[:12], email)
 			} else {
 				complete = false // reconnected meanwhile; its calendar is unpolled
 			}
@@ -340,16 +345,14 @@ func reconcile(dataDir string, cands map[string]*job, complete bool) error {
 		return err
 	}
 	for _, e := range ents {
-		data, err := os.ReadFile(jobPath(dataDir, e.Name()))
+		j, err := readJob(dataDir, e.Name())
 		if err != nil {
-			continue // not a job directory
+			if errors.Is(err, errBadJob) {
+				slog.Warn("unreadable job file", "job", e.Name())
+			}
+			continue // or not a job directory
 		}
-		var j job
-		if err := json.Unmarshal(data, &j); err != nil || j.ID != e.Name() {
-			slog.Warn("unreadable job file", "job", e.Name())
-			continue
-		}
-		existing[j.ID] = &j
+		existing[j.ID] = j
 	}
 
 	var errs []error

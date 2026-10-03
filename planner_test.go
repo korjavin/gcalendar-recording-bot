@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strconv"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -171,11 +172,7 @@ func apiEvent(uid string, start time.Time, mod func(map[string]any)) map[string]
 func plannerSetup(t *testing.T) (*Config, *fakeCalendar) {
 	cfg := testConfig(t)
 	cfg.JitsiBaseURL = jitsiBase
-	f := newFakeCalendar(t)
-	old := sendDisconnected
-	sendDisconnected = func(*Config, string) {}
-	t.Cleanup(func() { sendDisconnected = old })
-	return cfg, f
+	return cfg, newFakeCalendar(t)
 }
 
 func connect(t *testing.T, cfg *Config, email, refresh string) {
@@ -302,8 +299,7 @@ func TestPollPartialFailureKeepsJobs(t *testing.T) {
 
 func TestPollInvalidGrantDropsConnection(t *testing.T) {
 	cfg, f := plannerSetup(t)
-	var disconnected []string
-	sendDisconnected = func(_ *Config, email string) { disconnected = append(disconnected, email) }
+	smtp := useFakeSMTP(t)
 	now := time.Date(2026, 10, 3, 8, 0, 0, 0, time.UTC)
 	connect(t, cfg, "carol@example.com", "revoked")
 	connect(t, cfg, "alice@example.com", "rt-alice")
@@ -321,16 +317,14 @@ func TestPollInvalidGrantDropsConnection(t *testing.T) {
 	if _, err := os.Stat(connectionPath(cfg.DataDir, "alice@example.com")); err != nil {
 		t.Errorf("healthy connection removed: %v", err)
 	}
-	if !slices.Equal(disconnected, []string{"carol@example.com"}) {
-		t.Errorf("disconnect notices = %v", disconnected)
+	if m := smtp.wait(t); !slices.Equal(m.to, []string{"RCPT TO:<carol@example.com>"}) || !strings.Contains(m.data, "Subject: Calendar disconnected") {
+		t.Errorf("disconnect notice to %v:\n%s", m.to, m.data)
 	}
 	if len(jobs(t, cfg)) != 0 {
 		t.Error("revoked connection's job not dropped")
 	}
 	poll(t, cfg, now)
-	if len(disconnected) != 1 {
-		t.Errorf("disconnect notice sent %d times, want once", len(disconnected))
-	}
+	smtp.none(t)
 }
 
 // A reconnect that lands while the old, revoked token is being refreshed must

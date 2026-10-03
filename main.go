@@ -16,7 +16,9 @@ func main() {
 	}
 	slog.SetDefault(slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: cfg.LogLevel})))
 
-	go runPlanner(context.Background(), cfg)
+	notifier = newMailer(cfg)
+	ctx := context.Background()
+	go runPlanner(ctx, cfg, func() { go runScheduler(ctx, cfg) })
 
 	srv := &http.Server{
 		Addr:              cfg.ListenAddr,
