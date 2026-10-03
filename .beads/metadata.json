@@ -1,0 +1,7 @@
+{
+  "database": "dolt",
+  "backend": "dolt",
+  "dolt_mode": "embedded",
+  "dolt_database": "gcalendar_recording_bot",
+  "project_id": "1ec84ce8-dbaa-4cef-9929-b7a20cbd1fc3"
+}
