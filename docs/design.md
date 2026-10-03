@@ -8,16 +8,15 @@ calendar bot.
 
 1. Opens the bot's web page and clicks **Connect Google Calendar**. Google asks
    for read-only access to their calendar. Done.
-2. Invites the bot's address (`BOT_INVITE_EMAIL`, e.g. `notetaker@example.com`)
-   to any meeting they want recorded, like inviting a colleague.
+2. Writes `#note` in the title or description of any meeting they organize and
+   want recorded.
 3. Gets e-mails: "admit NoteTaker from the lobby" when the bot knocks, and
    "Transcript ready: <link>" when the transcript is in Outline (or a one-line
    failure note).
 
-The bot has no Google account. `BOT_INVITE_EMAIL` is only a marker the bot looks
-for among a meeting's attendees; it joins calls as an anonymous guest. The
-address must be a deliverable mailbox (an alias or a plus-address is enough),
-otherwise every invitation bounces back to the organizer.
+The bot has no Google account and no address to invite; it joins calls as an
+anonymous guest. Only the organizer can edit a meeting's title and
+description, so only the organizer decides whether it is recorded.
 
 To stop, the user removes the bot's access in their Google account
 (Security → third-party access). The next poll sees `invalid_grant`, drops the
@@ -28,7 +27,10 @@ connection and e-mails them that it is disconnected.
 An event in a connected calendar is recorded when all hold:
 
 * it is not cancelled;
-* `BOT_INVITE_EMAIL` is among its attendees (case-insensitive);
+* it is not an all-day event;
+* `#note` appears in its title (`summary`), `description` (HTML-unescaped) or
+  `location`, case-insensitive, as a whole tag: `#notes`, `#notebook` and
+  `a#note` do not count;
 * it has a call link: Google Meet from `conferenceData` (video entry point) or
   `hangoutLink`, or a Jitsi link under `JITSI_BASE_URL` found in `location` or
   `description`. A Jitsi link wins when both are present: Google Calendar adds a Meet
@@ -43,7 +45,7 @@ is on the job's notification list.
 
 ## 3. Web page and Google OAuth
 
-* `GET /` — one page: what the bot does, the invite address, the **Connect**
+* `GET /` — one page: what the bot does, how to tag a meeting, the **Connect**
   button. It shows nothing about anybody's meetings, so it needs no login.
 * `GET /connect` — redirect to Google's consent screen: authorization-code flow,
   `access_type=offline`, `prompt=consent`, scopes `openid email
@@ -75,7 +77,7 @@ Internal app also needs no verification and its refresh tokens do not expire
 * A candidate becomes a scheduled job (`DATA_DIR/jobs/<id>/job.json`, state
   `scheduled`) with title (event summary), url, start, end, notify list.
 * Each poll reconciles: a scheduled (not yet started) job whose occurrence is
-  gone, cancelled, moved (new id) or no longer invites the bot is dropped.
+  gone, cancelled, moved (new id) or is no longer tagged is dropped.
 * A scheduler loop starts each job `JOIN_LEAD_S` (90) before its start:
   `POST /recordings` with `join_timeout_s` = `JOIN_TIMEOUT_S` (1200),
   `max_duration_s` = event length + `OVERRUN_S` (1800), `empty_grace_s` =

@@ -1,9 +1,8 @@
 # gcalendar-recording-bot
 
-Records the meetings you invite it to. Connect your Google Calendar on the
-bot's web page (read-only OAuth), then add the bot's address
-(e.g. `notetaker@example.com`) as an attendee to any Google Meet or Jitsi
-meeting. The bot joins the call, records it through the matching recorder
+Records the meetings you tag with `#note`. Connect your Google Calendar on the
+bot's web page (read-only OAuth), then write `#note` in the title or
+description of any Google Meet or Jitsi meeting you organize. The bot joins the call, records it through the matching recorder
 service, hands the audio to the transcriber, and e-mails you when the
 transcript is ready.
 
@@ -24,7 +23,7 @@ docker build -t gcalendar-recording-bot .
 Environment only; [`.env.example`](.env.example) lists every variable with a
 placeholder and a comment, and `config.go` is the single reader. Required:
 `PUBLIC_URL`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `TOKEN_KEY`,
-`ALLOWED_EMAIL_DOMAINS`, `BOT_INVITE_EMAIL`, `RECORDER_SECRET`, `WEBHOOK_URL`,
+`ALLOWED_EMAIL_DOMAINS`, `RECORDER_SECRET`, `WEBHOOK_URL`,
 `WEBHOOK_SECRET`, and at least one of `JITSI_RECORDER_URL` / `MEET_RECORDER_URL`.
 
 Generate the secrets:
@@ -69,11 +68,7 @@ Implicit TLS (port 465) is not supported.
    `https://notetaker.example.com/oauth/callback` — it must match `PUBLIC_URL`
    exactly (scheme, host, no trailing slash). Put the client ID and secret into
    `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET`.
-6. **Invite address.** `BOT_INVITE_EMAIL` is only a marker the bot looks for
-   among attendees; it has no Google account. It must still be a deliverable
-   mailbox — an alias or a plus-address (`you+notetaker@example.com`) is
-   enough — otherwise every invitation bounces back to the organiser.
-7. **Allowed domains.** Set `ALLOWED_EMAIL_DOMAINS` (e.g. `example.com`): only
+6. **Allowed domains.** Set `ALLOWED_EMAIL_DOMAINS` (e.g. `example.com`): only
    these accounts may connect, even with an Internal consent screen.
 
 ## Deploy
@@ -109,9 +104,9 @@ updates `deploy` and only skips the webhook call.
   with an account from `ALLOWED_EMAIL_DOMAINS` and allow read-only calendar
   access. The page answers "Connected as …". Connecting again replaces the
   stored token.
-- **Record a meeting:** add `BOT_INVITE_EMAIL` as an attendee of a meeting with
-  a Google Meet link (or a Jitsi link under `JITSI_BASE_URL` in the location or
-  description). The calendar is read every `POLL_INTERVAL_S`, and the recorder
+- **Record a meeting:** write `#note` in the title or description of a meeting
+  you organize with a Google Meet link (or a Jitsi link under `JITSI_BASE_URL`
+  in the location or description). `#notes` or `#notebook` do not count. The calendar is read every `POLL_INTERVAL_S`, and the recorder
   joins `JOIN_LEAD_S` before the start.
 - **Disconnect:** remove the app in your Google account (*Security → Your
   connections to third-party apps & services*). On its next poll the bot drops
@@ -121,8 +116,8 @@ updates `deploy` and only skips the webhook call.
 
 1. `curl https://notetaker.example.com/health` answers `200`.
 2. Open the page, connect your calendar, and see "Connected as …".
-3. Create a Google Meet meeting starting in about 5 minutes and invite
-   `BOT_INVITE_EMAIL`. Wait for the next poll (up to `POLL_INTERVAL_S`), or
+3. Create a Google Meet meeting starting in about 5 minutes with `#note` in
+   its title. Wait for the next poll (up to `POLL_INTERVAL_S`), or
    restart the container to poll at once.
 4. Join the meeting yourself. When NoteTaker knocks you get a "waiting in the
    lobby" e-mail — admit it, talk for a minute or more (`MIN_RECORDING_S`),

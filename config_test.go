@@ -16,7 +16,6 @@ func validEnv() map[string]string {
 		"GOOGLE_CLIENT_SECRET":  "client-secret-value",
 		"TOKEN_KEY":             base64.StdEncoding.EncodeToString(make([]byte, 32)),
 		"ALLOWED_EMAIL_DOMAINS": " Example.com, ,example.org ",
-		"BOT_INVITE_EMAIL":      "NoteTaker@example.com",
 		"MEET_RECORDER_URL":     "http://meet-recorder:8080",
 		"RECORDER_SECRET":       "recorder-secret-value",
 		"WEBHOOK_URL":           "http://transcriber:8080/webhook",
@@ -33,7 +32,7 @@ func setEnv(t *testing.T, env map[string]string) {
 	for _, k := range []string{
 		"LISTEN_ADDR", "PUBLIC_URL", "DATA_DIR", "LOG_LEVEL",
 		"GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET", "TOKEN_KEY",
-		"ALLOWED_EMAIL_DOMAINS", "BOT_INVITE_EMAIL", "BOT_DISPLAY_NAME",
+		"ALLOWED_EMAIL_DOMAINS", "BOT_DISPLAY_NAME",
 		"JITSI_BASE_URL", "JITSI_RECORDER_URL", "MEET_RECORDER_URL", "RECORDER_SECRET",
 		"WEBHOOK_URL", "WEBHOOK_SECRET",
 		"SMTP_HOST", "SMTP_PORT", "SMTP_USER", "SMTP_PASSWORD", "SMTP_FROM",
@@ -58,8 +57,8 @@ func TestLoadConfigValid(t *testing.T) {
 	if strings.Join(c.AllowedEmailDomains, ",") != "example.com,example.org" {
 		t.Errorf("domains = %v", c.AllowedEmailDomains)
 	}
-	if c.BotInviteEmail != "notetaker@example.com" || len(c.TokenKey) != 32 {
-		t.Errorf("invite/key: %q %d", c.BotInviteEmail, len(c.TokenKey))
+	if len(c.TokenKey) != 32 {
+		t.Errorf("key: %d", len(c.TokenKey))
 	}
 	if c.PollInterval != 300*time.Second || c.JoinLead != 90*time.Second || c.SMTPPort != 587 {
 		t.Errorf("durations: %v %v %d", c.PollInterval, c.JoinLead, c.SMTPPort)
@@ -75,7 +74,7 @@ func TestLoadConfigValid(t *testing.T) {
 func TestLoadConfigMissingRequired(t *testing.T) {
 	for _, name := range []string{
 		"PUBLIC_URL", "GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET", "TOKEN_KEY",
-		"ALLOWED_EMAIL_DOMAINS", "BOT_INVITE_EMAIL", "RECORDER_SECRET",
+		"ALLOWED_EMAIL_DOMAINS", "RECORDER_SECRET",
 		"WEBHOOK_URL", "WEBHOOK_SECRET", "SMTP_FROM", "MEET_RECORDER_URL",
 	} {
 		t.Run(name, func(t *testing.T) {

@@ -23,7 +23,6 @@ type Config struct {
 	TokenKey           []byte // 32 bytes, AES-256 key for refresh tokens at rest
 
 	AllowedEmailDomains []string // lower-case, non-empty
-	BotInviteEmail      string
 	BotDisplayName      string
 
 	JitsiBaseURL     string
@@ -90,7 +89,6 @@ func loadConfig() (*Config, error) {
 		GoogleClientID:     required("GOOGLE_CLIENT_ID"),
 		GoogleClientSecret: required("GOOGLE_CLIENT_SECRET"),
 
-		BotInviteEmail: strings.ToLower(required("BOT_INVITE_EMAIL")),
 		BotDisplayName: str("BOT_DISPLAY_NAME", "NoteTaker"),
 
 		JitsiBaseURL:     strings.TrimRight(str("JITSI_BASE_URL", ""), "/"),
