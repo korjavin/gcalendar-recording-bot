@@ -26,8 +26,21 @@ func validEnv() map[string]string {
 	}
 }
 
+// setEnv clears every config variable, so the caller's shell can't leak in,
+// then applies env.
 func setEnv(t *testing.T, env map[string]string) {
 	t.Helper()
+	for _, k := range []string{
+		"LISTEN_ADDR", "PUBLIC_URL", "DATA_DIR", "LOG_LEVEL",
+		"GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET", "TOKEN_KEY",
+		"ALLOWED_EMAIL_DOMAINS", "BOT_INVITE_EMAIL", "BOT_DISPLAY_NAME",
+		"JITSI_BASE_URL", "JITSI_RECORDER_URL", "MEET_RECORDER_URL", "RECORDER_SECRET",
+		"WEBHOOK_URL", "WEBHOOK_SECRET",
+		"SMTP_HOST", "SMTP_PORT", "SMTP_USER", "SMTP_PASSWORD", "SMTP_FROM",
+		"POLL_INTERVAL_S", "JOIN_LEAD_S", "JOIN_TIMEOUT_S", "OVERRUN_S", "EMPTY_GRACE_S", "MIN_RECORDING_S",
+	} {
+		t.Setenv(k, "")
+	}
 	for k, v := range env {
 		t.Setenv(k, v)
 	}
@@ -40,7 +53,7 @@ func TestLoadConfigValid(t *testing.T) {
 		t.Fatal(err)
 	}
 	if c.PublicURL != "https://bot.example.com" || c.ListenAddr != ":8080" || c.DataDir != "/data" {
-		t.Errorf("defaults: %+v", c)
+		t.Errorf("defaults: %q %q %q", c.PublicURL, c.ListenAddr, c.DataDir)
 	}
 	if strings.Join(c.AllowedEmailDomains, ",") != "example.com,example.org" {
 		t.Errorf("domains = %v", c.AllowedEmailDomains)
@@ -49,7 +62,7 @@ func TestLoadConfigValid(t *testing.T) {
 		t.Errorf("invite/key: %q %d", c.BotInviteEmail, len(c.TokenKey))
 	}
 	if c.PollInterval != 300*time.Second || c.JoinLead != 90*time.Second || c.SMTPPort != 587 {
-		t.Errorf("durations: %+v", c)
+		t.Errorf("durations: %v %v %d", c.PollInterval, c.JoinLead, c.SMTPPort)
 	}
 }
 
