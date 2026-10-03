@@ -332,3 +332,23 @@ func TestPollInvalidGrantDropsConnection(t *testing.T) {
 		t.Errorf("disconnect notice sent %d times, want once", len(disconnected))
 	}
 }
+
+// A reconnect that lands while the old, revoked token is being refreshed must
+// survive: only the polled version of the connection file is dropped.
+func TestDropConnectionKeepsReplacedConnection(t *testing.T) {
+	cfg := testConfig(t)
+	connect(t, cfg, "alice@example.com", "revoked")
+	path := connectionPath(cfg.DataDir, "alice@example.com")
+	polled, _ := os.ReadFile(path)
+	connect(t, cfg, "alice@example.com", "rt-new")
+	if dropConnection(path, polled) {
+		t.Fatal("dropped a connection replaced after the poll read it")
+	}
+	if _, err := os.Stat(path); err != nil {
+		t.Fatalf("replaced connection removed: %v", err)
+	}
+	cur, _ := os.ReadFile(path)
+	if !dropConnection(path, cur) {
+		t.Fatal("unchanged connection not dropped")
+	}
+}

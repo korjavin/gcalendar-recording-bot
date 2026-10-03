@@ -182,14 +182,17 @@ func pollOnce(ctx context.Context, cfg *Config, now time.Time) error {
 			continue
 		}
 		path := filepath.Join(cfg.DataDir, "connections", e.Name())
-		email, err := pollConnection(ctx, cfg, path, now, cands)
+		data, err := os.ReadFile(path)
+		if err != nil {
+			continue // removed since ReadDir
+		}
+		email, err := pollConnection(ctx, cfg, data, now, cands)
 		switch {
 		case errors.Is(err, errInvalidGrant):
-			slog.Info("calendar access revoked; dropping connection", "email_hash", emailHash(email)[:12])
-			if err := os.Remove(path); err != nil {
-				slog.Error("drop connection", "err", err)
+			if dropConnection(path, data) {
+				slog.Info("calendar access revoked; connection dropped", "email_hash", emailHash(email)[:12])
+				sendDisconnected(cfg, email)
 			}
-			sendDisconnected(cfg, email)
 		case err != nil:
 			complete = false
 			slog.Warn("poll connection failed", "connection", strings.TrimSuffix(e.Name(), ".json"), "err", err)
@@ -200,11 +203,7 @@ func pollOnce(ctx context.Context, cfg *Config, now time.Time) error {
 
 // pollConnection adds the connection's candidates to cands and returns the
 // connection's e-mail (for logs and the disconnect notice).
-func pollConnection(ctx context.Context, cfg *Config, path string, now time.Time, cands map[string]*job) (string, error) {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return "", err
-	}
+func pollConnection(ctx context.Context, cfg *Config, data []byte, now time.Time, cands map[string]*job) (string, error) {
 	var c connection
 	if err := json.Unmarshal(data, &c); err != nil {
 		return "", fmt.Errorf("connection file: %w", err)
