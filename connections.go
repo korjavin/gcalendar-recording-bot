@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"crypto/aes"
 	"crypto/cipher"
 	"crypto/rand"
@@ -8,9 +9,11 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -82,7 +85,34 @@ func saveConnection(dataDir string, key []byte, email, refreshToken string, now 
 	if err != nil {
 		return err
 	}
-	path := connectionPath(dataDir, email)
+	connMu.Lock()
+	defer connMu.Unlock()
+	return writeFileAtomic(connectionPath(dataDir, email), data)
+}
+
+// connMu orders connection replacement (a reconnect) against removal (a
+// revoked token), so a poll never deletes a connection made after it read one.
+var connMu sync.Mutex
+
+// dropConnection removes the connection file only if it still holds polled;
+// it reports whether it did.
+func dropConnection(path string, polled []byte) bool {
+	connMu.Lock()
+	defer connMu.Unlock()
+	cur, err := os.ReadFile(path)
+	if err != nil || !bytes.Equal(cur, polled) {
+		return false
+	}
+	if err := os.Remove(path); err != nil {
+		slog.Error("drop connection", "err", err)
+		return false
+	}
+	return true
+}
+
+// writeFileAtomic writes data to path via a temp file + rename, creating the
+// parent directory (0700); the file ends up mode 0600.
+func writeFileAtomic(path string, data []byte) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return err
 	}
