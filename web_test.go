@@ -16,6 +16,11 @@ import (
 // given e-mail and refresh token.
 func fakeGoogle(t *testing.T, email, refresh *string) {
 	t.Helper()
+	fakeGoogleScope(t, email, refresh, oauthScopes)
+}
+
+func fakeGoogleScope(t *testing.T, email, refresh *string, scope string) {
+	t.Helper()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		r.ParseForm()
 		if r.Form.Get("grant_type") != "authorization_code" || r.Form.Get("code") != "good-code" ||
@@ -25,7 +30,7 @@ func fakeGoogle(t *testing.T, email, refresh *string) {
 		}
 		claims, _ := json.Marshal(map[string]any{"aud": "client-id", "email": *email, "email_verified": true})
 		idToken := "e30." + base64.RawURLEncoding.EncodeToString(claims) + ".sig"
-		json.NewEncoder(w).Encode(map[string]string{"access_token": "at", "refresh_token": *refresh, "id_token": idToken})
+		json.NewEncoder(w).Encode(map[string]string{"access_token": "at", "refresh_token": *refresh, "id_token": idToken, "scope": scope})
 	}))
 	t.Cleanup(srv.Close)
 	old := googleTokenURL
@@ -162,6 +167,18 @@ func TestCallbackExchangeFails(t *testing.T) {
 	cfg := testConfig(t)
 	if rec := callback(cfg, "s1", "s1", "bad-code"); rec.Code != http.StatusBadGateway {
 		t.Fatalf("status %d, want 502", rec.Code)
+	}
+}
+
+func TestCallbackNoCalendarScope(t *testing.T) {
+	email, refresh := "alice@example.com", "rt-1"
+	fakeGoogleScope(t, &email, &refresh, "openid https://www.googleapis.com/auth/userinfo.email")
+	cfg := testConfig(t)
+	if rec := callback(cfg, "s1", "s1", "good-code"); rec.Code != http.StatusBadRequest {
+		t.Fatalf("status %d, want 400", rec.Code)
+	}
+	if _, err := os.Stat(cfg.DataDir + "/connections"); !os.IsNotExist(err) {
+		t.Fatal("connection stored without calendar scope")
 	}
 }
 

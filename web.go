@@ -24,9 +24,13 @@ var (
 )
 
 const (
-	oauthScopes     = "openid email https://www.googleapis.com/auth/calendar.readonly"
+	calendarScope   = "https://www.googleapis.com/auth/calendar.readonly"
+	oauthScopes     = "openid email " + calendarScope
 	stateCookieName = "oauth_state"
 )
+
+// errNoCalendar: the user unticked calendar access on Google's consent screen.
+var errNoCalendar = errors.New("calendar scope not granted")
 
 var httpClient = &http.Client{Timeout: 30 * time.Second}
 
@@ -114,6 +118,10 @@ func handleCallback(w http.ResponseWriter, r *http.Request, cfg *Config) {
 	}
 
 	refresh, email, err := exchangeCode(r, cfg, code)
+	if errors.Is(err, errNoCalendar) {
+		render(w, cfg, http.StatusBadRequest, page{Message: "Calendar access was not granted, so nothing was connected. Please connect again and allow calendar access."})
+		return
+	}
 	if err != nil {
 		slog.Warn("oauth exchange failed", "err", err)
 		render(w, cfg, http.StatusBadGateway, page{Message: "Connecting to Google failed. Please try again."})
@@ -163,9 +171,13 @@ func exchangeCode(r *http.Request, cfg *Config, code string) (refresh, email str
 	var tok struct {
 		RefreshToken string `json:"refresh_token"`
 		IDToken      string `json:"id_token"`
+		Scope        string `json:"scope"`
 	}
 	if err := json.Unmarshal(body, &tok); err != nil {
 		return "", "", errors.New("token response is not JSON")
+	}
+	if !slices.Contains(strings.Fields(tok.Scope), calendarScope) {
+		return "", "", errNoCalendar
 	}
 	if tok.RefreshToken == "" {
 		return "", "", errors.New("token response has no refresh_token")
