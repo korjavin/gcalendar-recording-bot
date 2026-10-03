@@ -85,6 +85,13 @@ Internal app also needs no verification and its refresh tokens do not expire
   is set once the transcriber answers `2xx`. Delivery retries on `5 s, 15 s,
   45 s, 2 min, 5 min`, then an hourly sweep and every startup send whatever is
   still not handed off. Redirects are not followed.
+* A watchdog runs every minute. A job's deadline is the time it was started
+  + `join_timeout_s` + `max_duration_s` + 10 min; a job still `starting` or
+  `started` after it is checked with a signed `GET /recordings/{id}`: still
+  running → checked again 10 min later; finished/failed → the job record is
+  taken as the lost event; `404` or unreachable three checks in a row → failed
+  `lost`, with the failure e-mail. After a restart, running jobs stay under
+  the watchdog; scheduled ones are re-planned by the next poll.
 * `invalid_grant` on refresh → delete the connection, e-mail its owner once.
 
 ## 5. Notifications (e-mail)

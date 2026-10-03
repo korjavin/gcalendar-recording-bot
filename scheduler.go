@@ -120,6 +120,7 @@ func claimDue(cfg *Config, now time.Time) []*job {
 			continue
 		}
 		j.State = stateStarting
+		j.Deadline, j.Misses = now.Add(cfg.JoinTimeout+maxDuration(cfg, j)+watchdogDelay), 0
 		if err := writeJob(cfg.DataDir, j); err != nil {
 			slog.Error("claim job failed", "job", j.ID, "err", err)
 			continue
@@ -162,6 +163,9 @@ func recorderFor(cfg *Config, callURL string) string {
 	return cfg.JitsiRecorderURL
 }
 
+// maxDuration is the recorder's max_duration_s for j.
+func maxDuration(cfg *Config, j *job) time.Duration { return j.End.Sub(j.Start) + cfg.Overrun }
+
 // postRecording asks the recorder to join; network errors and 5xx are retried.
 func postRecording(ctx context.Context, cfg *Config, j *job) error {
 	base := recorderFor(cfg, j.URL)
@@ -174,7 +178,7 @@ func postRecording(ctx context.Context, cfg *Config, j *job) error {
 		"callback_url":   cfg.PublicURL + "/events",
 		"display_name":   cfg.BotDisplayName,
 		"join_timeout_s": int(cfg.JoinTimeout.Seconds()),
-		"max_duration_s": int((j.End.Sub(j.Start) + cfg.Overrun).Seconds()),
+		"max_duration_s": int(maxDuration(cfg, j).Seconds()),
 		"empty_grace_s":  int(cfg.EmptyGrace.Seconds()),
 	})
 	if err != nil {
@@ -268,9 +272,19 @@ func handleEvents(w http.ResponseWriter, r *http.Request, cfg *Config) {
 		http.Error(w, "unknown job", http.StatusNotFound)
 		return
 	}
-	if slices.Contains(j.Events, ev.Event) {
-		w.WriteHeader(http.StatusOK)
+	if !applyEvent(cfg, j, &ev) {
+		http.Error(w, "storage error", http.StatusInternalServerError)
 		return
+	}
+	w.WriteHeader(http.StatusOK)
+}
+
+// applyEvent records a recorder event for j (read under jobsMu, which the
+// caller holds) and sends its e-mail or hand-off. A repeated event is a
+// no-op. false means the job could not be saved and nothing was sent.
+func applyEvent(cfg *Config, j *job, ev *recEvent) bool {
+	if slices.Contains(j.Events, ev.Event) {
+		return true
 	}
 
 	switch ev.Event {
@@ -283,22 +297,20 @@ func handleEvents(w http.ResponseWriter, r *http.Request, cfg *Config) {
 		if time.Duration(ev.DurationS*float64(time.Second)) >= cfg.MinRecording {
 			// Stored with the state, so a crash before delivery loses nothing:
 			// the startup and hourly sweeps send whatever is still pending.
-			j.Webhook = buildWebhook(cfg, j, &ev)
+			j.Webhook = buildWebhook(cfg, j, ev)
 		}
 	case "recording.failed":
 		j.State, j.Error = stateFailed, ev.Error
 	default:
 		slog.Warn("unknown recorder event ignored", "job", j.ID, "event", ev.Event)
-		w.WriteHeader(http.StatusOK)
-		return
+		return true
 	}
 	j.Events = append(j.Events, ev.Event)
 	// State first, side effects after: a failed write is retried by the
-	// recorder and must not have sent anything yet.
+	// recorder (or the watchdog) and must not have sent anything yet.
 	if err := writeJob(cfg.DataDir, j); err != nil {
 		slog.Error("write job failed", "job", j.ID, "err", err)
-		http.Error(w, "storage error", http.StatusInternalServerError)
-		return
+		return false
 	}
 	slog.Info("recorder event", "job", j.ID, "event", ev.Event)
 
@@ -318,5 +330,5 @@ func handleEvents(w http.ResponseWriter, r *http.Request, cfg *Config) {
 		}
 		notifier.mailFailed(j.ID, j.Notify, j.Title, reason)
 	}
-	w.WriteHeader(http.StatusOK)
+	return true
 }

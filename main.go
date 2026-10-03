@@ -20,6 +20,7 @@ func main() {
 	ctx := context.Background()
 	go runPlanner(ctx, cfg, func() { go runScheduler(ctx, cfg) })
 	go runHandOffs(ctx, cfg)
+	go runWatchdog(ctx, cfg)
 
 	srv := &http.Server{
 		Addr:              cfg.ListenAddr,
