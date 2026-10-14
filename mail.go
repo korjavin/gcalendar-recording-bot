@@ -89,6 +89,7 @@ func (m *mailer) send(job string, to []string, subject, body string) {
 		for attempt := 0; ; attempt++ {
 			err := m.deliver(to, msg)
 			if err == nil {
+				slog.Info("e-mail sent", "job", job, "attempt", attempt+1)
 				return
 			}
 			// SMTP reply text often quotes the address, so log only its code.
